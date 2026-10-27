@@ -1,5 +1,5 @@
 {
-  "note": "Our own record of vendored third-party skills. Not the format of any CLI lock file. Re-review a skill before updating it. Skills not listed here (write-tests, graphql-operation, db-migration-review, security-review-backend) are our own, adapted from caresync-api.",
+  "note": "Our own record of vendored third-party skills. Not the format of any CLI lock file. Re-review a skill before updating it. Skills not listed here (write-tests, graphql-operation, db-migration-review, security-review-backend) are our own.",
   "skills": {
     "graphql-schema": {
       "source": "apollographql/skills",
