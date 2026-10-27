@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.test)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.production)",
+      "Read(./config/master.key)",
+      "Read(**/config/master.key)",
+      "Read(**/config/credentials/*.key)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/id_rsa)",
+      "Read(**/credentials.json)",
+      "Read(**/secrets.json)",
+      "Read(**/secrets.yml)",
+      "Read(**/secrets.yaml)",
+      "Bash(cat .env*)",
+      "Bash(cat config/master.key)",
+      "Bash(bin/rails credentials:*)",
+      "Bash(printenv:*)",
+      "Bash(env)"
+    ],
+    "ask": [
+      "Bash(bin/rails db:migrate:*)",
+      "Bash(bin/rails db:rollback:*)",
+      "Bash(bin/rails db:drop:*)",
+      "Bash(bin/rails db:reset:*)",
+      "Bash(bin/rails db:schema:load:*)"
+    ]
+  }
+}

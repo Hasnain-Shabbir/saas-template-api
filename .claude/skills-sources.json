@@ -1,0 +1,67 @@
+{
+  "note": "Our own record of vendored third-party skills. Not the format of any CLI lock file. Re-review a skill before updating it. Skills not listed here (write-tests, graphql-operation, db-migration-review, security-review-backend) are our own, adapted from caresync-api.",
+  "skills": {
+    "graphql-schema": {
+      "source": "apollographql/skills",
+      "sourceType": "github",
+      "skillPath": "skills/graphql-schema",
+      "upstreamCommit": "5a62472a19f6d39abc727ffbe36e3dac7c747641",
+      "reviewedOn": "2026-10-27",
+      "upstreamSkillMdSha256": "d9b1ec9092dca72b604c718191a19654a1694939c28e4a8261868c7e45c9f4a3",
+      "localFileSha256": {
+        "SKILL.md": "dc4cb96c4e424ac2a06cee1f1196346c29b863913a70c8718fe94691aff615fc",
+        "references/errors.md": "cc1d14124a9e0e2bcd6d5a840d3ee3513e15344964709e6732f47db467e1b551",
+        "references/naming.md": "0dc9e8ab4dfed452a115e41fb40c7de823ba8c4f5ac1e71f699d8d10e7840aa1",
+        "references/pagination.md": "53e53410bb6160124a015f2604049c8f15b265982a86858ff695bfb0beea287d",
+        "references/security.md": "3890ef827968d131a9cf8b87458b8d38ffe60b459371e5e520fa4c444f91faef",
+        "references/types.md": "1d972ec841fb1ff4137c07643b1c0e54c9358ad1e0e98f22ba47567cb7ea61ef"
+      },
+      "localPatches": "frontmatter only: removed allowed-tools (Bash(npm:*), Bash(npx:*)), shortened description and mentioned graphql-ruby, added paths app/graphql/**. Body and references unchanged."
+    },
+    "postgresql-table-design": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/database-design/skills/postgresql-table-design",
+      "upstreamCommit": "0874a27b17a22e2b7c2e2bcd725768e0803cad06",
+      "reviewedOn": "2026-10-27",
+      "upstreamSkillMdSha256": "1e27b0fac6d88a710cd925b831608ca202c40ade4f4e285a8e027dcf2f9a44ea",
+      "localFileSha256": {
+        "SKILL.md": "f75cdfdb07f3e25af44e318ce00f85d0d9f9067049807459768ea755e7934898",
+        "references/details.md": "fac8b43c75ed30d95f2ab12886021f26bb8b03f8fed0cea2929b8de18953023a"
+      },
+      "localPatches": "frontmatter only: added paths db/** and app/models/**. Body and references unchanged."
+    },
+    "ruby": {
+      "source": "lucianghinda/superpowers-ruby",
+      "sourceType": "github",
+      "skillPath": "skills/ruby",
+      "upstreamCommit": "99fac3d8bee27bab20b23d4bef6fa634738a59e8",
+      "reviewedOn": "2026-10-27",
+      "upstreamSkillMdSha256": "5545ca29d0a78cb4e4d88b580d5fa2ed02f5f8de5491fa1f88d40814b91c6cd8",
+      "localFileSha256": {
+        "SKILL.md": "dd94f80512eee98fcee237a8cb2b33d8421ec10cad58ece16a231b6bc8b6188a",
+        "references/error_handling.md": "59f22847ad9dab25678b333310b57406e308b55d79321c2bb63867d9e97bd8b3",
+        "references/method_ordering.md": "6c18b0bbf83a721a6082905c12e083ce6381fb578340ff24c0a529bd83a756e8",
+        "references/modern_ruby.md": "e67617e89ea41ca6fae27971124d1bd9b161e24a7f07d025ac5b288257e118ea",
+        "references/ood-philosophy.md": "7b493cd007fc04ea5cfd9301f39ddb4835a37a9260e865315f64b94c1dadfc90",
+        "references/performance.md": "95289471f3dcd1f392596766a3f1d9a4ba9085a68fab1cec9743cc4957bc8e9e"
+      },
+      "localPatches": "frontmatter only: removed references to skills that are not installed (rails-guides, minitest, sandi-metz-rules), added paths app/** and lib/**. Body and references unchanged. Project rules override it (it prefers fail over raise; this project uses raise)."
+    },
+    "brakeman": {
+      "source": "lucianghinda/superpowers-ruby",
+      "sourceType": "github",
+      "skillPath": "skills/brakeman",
+      "upstreamCommit": "99fac3d8bee27bab20b23d4bef6fa634738a59e8",
+      "reviewedOn": "2026-10-27",
+      "upstreamSkillMdSha256": "e8e2e9b8abe4c94ba270ec66b44601ea0712958e985b7f536a78c6eb63a5ab26",
+      "localFileSha256": {
+        "SKILL.md": "e8e2e9b8abe4c94ba270ec66b44601ea0712958e985b7f536a78c6eb63a5ab26",
+        "references/command_options.md": "c91124d182147b3dc9e21cc26d3a5ab692a7f8af58d702518010e2bd16ed83ec",
+        "references/reducing_false_positives.md": "d8a56b830e8dee4869c868a2f3af53982e250c6ab9d5f34ec424333c8c9d1821",
+        "references/warning_types.md": "2094486ce0864f17cda75e3ed55a4b91111a4aed3959bdf325c3161f003523f1"
+      },
+      "localPatches": "not changed. The upstream scripts/ folder (brakeman_helper.rb, calls system()) was NOT copied."
+    }
+  }
+}
