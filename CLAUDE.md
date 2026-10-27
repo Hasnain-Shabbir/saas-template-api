@@ -15,7 +15,7 @@ Loaded on demand. Only each skill's short description is always in context, and 
 ## Commands
 ```
 bin/rails server         # dev server
-bundle exec rspec        # whole suite (after RSpec is installed)
+bundle exec rspec        # whole suite
 bin/rubocop              # style
 bin/brakeman -q          # security scan
 ```
