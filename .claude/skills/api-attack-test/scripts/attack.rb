@@ -136,6 +136,42 @@ check("C9", "extra input fields (admin/id) rejected", r[:json]&.dig("errors") &&
 r = gql("mutation { signUp(input:{email:\"#{uniq}\", password:\"#{PW}\", clientMutationId:\"<img src=x onerror=alert(1)>\"}){ clientMutationId } }")
 check("C10", "reflected input is JSON-only", r[:headers]["content-type"].to_s.include?("json"), r[:headers]["content-type"])
 
+# C11: blind (time-based) SQL injection. A normal injection check looks for a login or an error; a blind one only shows as a slow answer.
+# Each payload asks PostgreSQL to sleep 4 seconds. If any answer is 3 seconds slower than the same call with a harmless value, the input reaches SQL.
+SLEEP = 4_000
+sleepers = ["'; SELECT pg_sleep(4)--", "' OR pg_sleep(4)--", "'||pg_sleep(4)||'", "1; SELECT pg_sleep(4)", "x') OR pg_sleep(4)--", "\" OR pg_sleep(4)--"]
+blind = {
+  "login email"           => ->(s) { login(s, "whatever-password") },
+  "login password"        => ->(s) { login(email, s) },
+  "signUp email"          => ->(s) { signup(s) },
+  "signUp password"       => ->(s) { signup(uniq, s) },
+  "requestPasswordReset"  => ->(s) { req_reset_blind(s) },
+  "resetPassword email"   => ->(s) { gql("mutation D($i: ResetPasswordInput!){ resetPassword(input:$i){ success } }", variables: { i: { email: s, code: "123456", password: "New-Passw0rd-9!" } }) },
+  "resetPassword code"    => ->(s) { gql("mutation D($i: ResetPasswordInput!){ resetPassword(input:$i){ success } }", variables: { i: { email: email, code: s, password: "New-Passw0rd-9!" } }) }
+}
+def req_reset_blind(s) = gql("mutation R($i: RequestPasswordResetInput!){ requestPasswordReset(input:$i){ success } }", variables: { i: { email: s } })
+blind.each_with_index do |(name, call), i|
+  base = [call.("harmless-value").fetch(:ms), call.("harmless-value").fetch(:ms)].max
+  slow = sleepers.map { |s| [s, call.(s)[:ms]] }.select { |_, ms| ms >= base + SLEEP - 1_000 }
+  check("C11.#{i}", "blind SQLi (pg_sleep) in #{name}", slow.empty?, "baseline=#{base}ms slow=#{slow.inspect}", bad: "CRITICAL")
+end
+
+# C12: second-order SQL injection and LIKE wildcards. The email format allows % and _ and +. Stored once, used in later queries.
+# A victim exists; an attacker registers an email that looks like a pattern of the victim's. Nothing may match the victim.
+victim = "qv#{SecureRandom.hex(4)}@example.test"
+victim_tok = tok_of(signup(victim))
+patterns = ["%@example.test", "qv%@example.test", "qv_#{victim[3..]}", "#{victim.sub('@', '%@')}", "#{victim.sub('@', '+x%@')}"]
+patterns.each_with_index do |pat, i|
+  r1 = signup(pat)
+  stored = tok_of(r1) # the pattern may be a valid new account; that is fine, it must be its OWN account
+  me_email = stored && gql(ME, token: stored)[:json]&.dig("data", "me", "email")
+  l = login(pat, "wrong-password-x")
+  rr = req_reset_blind(pat)
+  check("C12.#{i}", "pattern email #{pat[0, 22].inspect}: own account only, never the victim's",
+        (stored.nil? || me_email == pat.downcase.strip) && !tok_of(l, "login") && clean?(rr) && gql(ME, token: victim_tok)[:json]&.dig("data", "me", "email") == victim,
+        "#{r1[:body][0, 80]} me=#{me_email.inspect}", bad: "CRITICAL")
+end
+
 # ---------- D. GraphQL abuse ----------
 if LABEL == "prod"
   check("D1", "introspection OFF in production", !gql("{ __schema { types { name } } }")[:json]&.dig("data", "__schema"), "__schema answered")
@@ -229,6 +265,212 @@ if LABEL == "prod"
   $pinned_ip = nil
 end
 
+# ---------- I. Password reset (email OTP) ----------
+# The script cannot read the email, so in test mode a helper issues the code straight into the test database (the "inbox").
+# Prod mode has a different secret key, so only the black-box checks (I1 to I9) run there.
+REQ_RESET = "mutation R($i: RequestPasswordResetInput!){ requestPasswordReset(input:$i){ success errors{message path code} } }"
+DO_RESET  = "mutation D($i: ResetPasswordInput!){ resetPassword(input:$i){ success errors{message path code} } }"
+ROOT = File.expand_path("../../../..", __dir__)
+OTP_HELPER = File.join(__dir__, "otp_helper.rb")
+NEW_PW = "New-Passw0rd-9!"
+
+def req_reset(email, extra = {}) = gql(REQ_RESET, variables: { i: { email: email }.merge(extra) })
+def do_reset(email, otp_code, pw = NEW_PW) = gql(DO_RESET, variables: { i: { email: email, code: otp_code, password: pw } })
+def reset_ok?(r) = r[:json]&.dig("data", "resetPassword", "success") == true
+def reset_code(r) = r[:json]&.dig("data", "resetPassword", "errors", 0, "code")
+def otp(action, email) = IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", OTP_HELPER, action, email ], chdir: ROOT, err: File::NULL, &:read).to_s.strip
+def wrong_guess(real) = real == "000000" ? "111111" : "000000"
+
+rv = uniq
+signup(rv)
+known = req_reset(rv)
+unknown = req_reset(uniq)
+check("I1", "requestPasswordReset: known and unknown email give the same answer",
+      known[:json] == unknown[:json] && known[:json]&.dig("data", "requestPasswordReset", "success") == true, "#{known[:body][0, 120]} | #{unknown[:body][0, 120]}", bad: "HIGH")
+check("I2", "requestPasswordReset is on the public (throttled) list", PUBLIC_OPS.include?("requestPasswordReset") && PUBLIC_OPS.include?("resetPassword"), PUBLIC_OPS.inspect, bad: "HIGH")
+odd = [ "not-an-email", "", "x" * 5000, "' OR 1=1 --", "a@b.test\r\nBcc: evil@x.test", "‮@x.test" ]
+odd_res = odd.map { |s| req_reset(s) }
+check("I3", "requestPasswordReset with odd input: clean, same answer as unknown email",
+      odd_res.all? { |x| clean?(x) && x[:json] == unknown[:json] }, odd_res.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "MEDIUM")
+aliases = (1..200).map { |i| "a#{i}: requestPasswordReset(input:{email:\"#{uniq}\"}){ success }" }.join(" ")
+r = gql("mutation { #{aliases} }")
+check("I4", "200 aliased reset requests in ONE request are refused", r[:status] == 400 || (r[:status] == 200 && !r[:json]&.dig("data")), "status=#{r[:status]} #{r[:body][0, 100]}", bad: "HIGH")
+r = req_reset(uniq, { role: "admin", id: "x", userId: SecureRandom.uuid })
+check("I5", "extra input fields on requestPasswordReset rejected", r[:json]&.dig("errors") && !r[:json]&.dig("data", "requestPasswordReset", "success"), r[:body][0, 160], bad: "MEDIUM")
+r = gql(DO_RESET, variables: { i: { email: uniq, code: "123456", password: NEW_PW, role: "admin" } })
+check("I6", "extra input fields on resetPassword rejected", r[:json]&.dig("errors") && !reset_ok?(r), r[:body][0, 160], bad: "MEDIUM")
+if LABEL == "prod"
+  t_known = avg(6) { req_reset(rv)[:ms] }
+  t_unknown = avg(6) { req_reset(uniq)[:ms] }
+  check("I7", "requestPasswordReset timing, known vs unknown email", (t_known - t_unknown).abs < [ t_known, t_unknown ].max * 0.4 + 15, "known=#{t_known.round}ms unknown=#{t_unknown.round}ms", bad: "WEAK")
+end
+no_code = uniq
+signup(no_code)
+guesses = [ do_reset(uniq, "123456"), do_reset(no_code, "123456"), do_reset(rv, wrong_guess("")) ]
+check("I8", "resetPassword: unknown email, no code, and wrong code all answer INVALID_CODE and identically",
+      guesses.all? { |x| reset_code(x) == "INVALID_CODE" } && guesses.map { |x| x[:json] }.uniq.size == 1, guesses.map { |x| x[:body][0, 90] }.uniq.inspect, bad: "HIGH")
+bad_codes = [ "", "12345", "1234567", "123456\n", " 123456", "１２３４５６", "1e5000", "0x1234", "' OR 1=1 --", "x" * 10_000, "123456" * 1000 ]
+bad_res = bad_codes.map { |c| do_reset(no_code, c) }
+check("I9", "resetPassword code in a wrong format: clean INVALID_CODE", bad_res.all? { |x| clean?(x) && reset_code(x) == "INVALID_CODE" }, bad_res.map { |x| x[:status] }.tally.inspect, bad: "MEDIUM")
+
+if LABEL == "test"
+  fresh = -> { e = uniq; t = tok_of(signup(e)); [ e, t ] }
+
+  e, session = fresh.call
+  c = otp("mint", e)
+  check("I10", "helper issued a 6-digit code", c.match?(/\A\d{6}\z/), c.inspect)
+  r = do_reset(e, c)
+  check("I11", "reset with the right code works", reset_ok?(r), r[:body][0, 160])
+  check("I12", "new password logs in, old password does not", tok_of(login(e, NEW_PW), "login") && !tok_of(login(e), "login"), bad: "HIGH")
+  check("I13", "session token from before the reset is dead", code(gql(ME, token: session)) == "UNAUTHENTICATED", bad: "HIGH")
+  check("I14", "reset does not hand out a token", r[:json]&.dig("data", "resetPassword")&.keys&.sort == %w[errors success], r[:body][0, 160], bad: "MEDIUM")
+  replay = do_reset(e, c, "Other-Passw0rd-7!")
+  check("I15", "replay of the used code is refused", reset_code(replay) == "INVALID_CODE" && !reset_ok?(replay), replay[:body][0, 160], bad: "CRITICAL")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  five = 5.times.map { do_reset(e, wrong_guess(c)) } # a new IP each time: only the per-code limit can stop this
+  check("I16", "5 wrong guesses from 5 IPs kill the code, even the right code is refused after",
+        five.all? { |x| reset_code(x) == "INVALID_CODE" } && reset_code(do_reset(e, c)) == "INVALID_CODE" && otp("attempts", e) == "nil", otp("attempts", e), bad: "CRITICAL")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  four = 4.times.map { do_reset(e, wrong_guess(c)) }
+  check("I17", "4 wrong guesses do not kill the code", four.all? { |x| reset_code(x) == "INVALID_CODE" } && otp("attempts", e) == "4", otp("attempts", e), bad: "MEDIUM")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  rs = 8.times.map { |i| Thread.new { do_reset(e, c, "Race-Passw0rd-#{i}x!") } }.map(&:value)
+  check("I18", "8 parallel resets with the same right code: exactly one succeeds, no 500",
+        rs.count { |x| reset_ok?(x) } == 1 && rs.all? { |x| clean?(x) }, rs.map { |x| x[:body][0, 70] }.tally.inspect, bad: "HIGH")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  rs = 20.times.map { Thread.new { do_reset(e, wrong_guess(c)) } }.map(&:value)
+  check("I19", "20 parallel wrong guesses: no 500, the code is dead, the right code is refused",
+        rs.all? { |x| clean?(x) } && reset_code(do_reset(e, c)) == "INVALID_CODE", rs.map { |x| x[:status] }.tally.inspect, bad: "CRITICAL")
+
+  ea, = fresh.call
+  eb, = fresh.call
+  ca = otp("mint", ea)
+  r = do_reset(eb, ca)
+  check("I20", "user A's code does not reset user B", reset_code(r) == "INVALID_CODE" && !tok_of(login(eb, NEW_PW), "login"), r[:body][0, 160], bad: "CRITICAL")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  weak = do_reset(e, c, "short")
+  check("I21", "weak password: VALIDATION_FAILED, the code survives, a good password then works",
+        weak[:json]&.dig("data", "resetPassword", "errors", 0, "code") == "VALIDATION_FAILED" && reset_ok?(do_reset(e, c)), weak[:body][0, 160], bad: "MEDIUM")
+
+  e, = fresh.call
+  c = otp("mint", e)
+  otp("expire", e)
+  check("I22", "expired code is refused", reset_code(do_reset(e, c)) == "INVALID_CODE", bad: "HIGH")
+
+  e, = fresh.call
+  7.times { login(e, "wrong-pw-#{SecureRandom.hex(3)}") }
+  locked = !tok_of(login(e), "login")
+  asked = req_reset(e)
+  c = otp("mint", e)
+  do_reset(e, c)
+  check("I23", "a locked account can ask for a reset, and the reset unlocks it", locked && asked[:json]&.dig("data", "requestPasswordReset", "success") && tok_of(login(e, NEW_PW), "login"), "locked=#{locked}", bad: "MEDIUM")
+
+  # I24: the reset email is the one place this API writes HTML. Nothing the user typed may end up in the body, and what is there must be escaped.
+  e = "q%+#{SecureRandom.hex(3)}@example.test" # the email format refuses < and >, so the nastiest legal value is used
+  signup(e)
+  html, text = otp("mail", e).split("\n----TEXT----\n", 2)
+  check("I24", "reset email body: only a 6-digit code and the lifetime, no user input, no raw tags beyond the template",
+        html.to_s.include?("<p") && !html.to_s.include?(e) && !text.to_s.include?(e) && html.scan(/\b\d{6}\b/).size == 1 && text.to_s.scan(/\b\d{6}\b/).size == 1 &&
+        !html.to_s.match?(/<script|onerror=|javascript:/i), html.to_s[0, 160], bad: "HIGH")
+end
+
+# ---------- J. OWASP GraphQL cheat sheet: batching, discovery, error leaks, timeouts ----------
+# Source: https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html
+jt = tok_of(signup(uniq))
+
+# J1: array-based batching. One HTTP request carrying many operations would get around every per-request limit
+# (the throttle, the 5-guesses-per-code limit). Must be refused as a whole.
+ops = ->(n, q) { Array.new(n) { { query: q } } }
+{ "J1.0" => ops.(20, "mutation { login(input:{email:\"#{email}\", password:\"guess\"}){ token } }"),
+  "J1.1" => ops.(200, "mutation { requestPasswordReset(input:{email:\"#{uniq}\"}){ success } }"),
+  "J1.2" => ops.(20, ME) }.each do |name, batch|
+  r = http(body: batch, headers: { "Authorization" => "Bearer #{jt}" })
+  answered = r[:json].is_a?(Array) || r[:json]&.dig("data")
+  check(name, "JSON array of #{batch.size} operations refused as a whole", clean?(r) && !answered && r[:status] == 400, "status=#{r[:status]} #{r[:body][0, 120]}", bad: "CRITICAL")
+end
+r = http(body: { _json: ops.(5, ME) }, headers: { "Authorization" => "Bearer #{jt}" })
+check("J1.3", "_json parameter does not smuggle a batch", clean?(r) && !r[:json].is_a?(Array) && !r[:json]&.dig("data"), r[:body][0, 120], bad: "HIGH")
+r = http(raw: "[" + ([JSON.generate({ query: ME })] * 20).join(",") + "]", headers: { "Authorization" => "Bearer #{jt}" })
+check("J1.4", "raw multiplex body refused", r[:status] == 400 && !r[:json].is_a?(Array), "status=#{r[:status]}", bad: "CRITICAL")
+
+# J2: NoSQL-style objects and shell metacharacters where a string is expected.
+[{ "$ne" => nil }, { "$gt" => "" }, { "$regex" => ".*" }].each_with_index do |o, i|
+  r = gql(LOGIN, variables: { i: { email: o, password: o } })
+  check("J2.#{i}", "operator object #{o.keys.first} instead of a string in login", clean?(r) && !tok_of(r, "login"), r[:body][0, 120], bad: "CRITICAL")
+end
+shells = [";sleep 4", "$(sleep 4)", "`sleep 4`", "|sleep 4", "&& sleep 4", "\nsleep 4"]
+[["login email", ->(s) { login(s, "whatever-password") }], ["signUp email", ->(s) { signup(s) }],
+ ["reset email", ->(s) { req_reset_blind(s) }]].each_with_index do |(name, call), i|
+  base = call.("harmless-value")[:ms]
+  slow = shells.map { |s| [s, call.(s)[:ms]] }.select { |_, ms| ms >= base + 3_000 }
+  check("J2.s#{i}", "shell metacharacters in #{name} cause no delay", slow.empty?, "baseline=#{base}ms slow=#{slow.inspect}", bad: "CRITICAL")
+end
+
+# J3: field discovery. With introspection off, an attacker guesses names. A guessed name must not exist, or must be locked.
+wordlist = %w[users allUsers user node nodes admin accounts account tenants tenant organizations organization debug config settings
+              viewer currentUser version health stats metrics logs tokens sessions roles permissions impersonate deleteUser updateUser
+              createUser createAdmin resetAllPasswords exportData backup]
+# A guess counts as a hit when its answer differs from the answer for a random name that surely does not exist.
+probe = ->(w) { [gql("{ #{w} { __typename } }"), gql("mutation { #{w}(input:{}) { __typename } }")] }
+fake = "zz#{SecureRandom.hex(4)}"
+fake_q, fake_m = probe.(fake).map { |x| x[:body].gsub(fake, "NAME") }
+hits = wordlist.select do |w|
+  q, m = probe.(w).map { |x| x[:body].gsub(w, "NAME") }
+  q != fake_q || m != fake_m
+end
+exposed = hits.select do |w|
+  r = gql("{ #{w} { __typename } }")
+  r2 = gql("mutation { #{w}(input:{}) { __typename } }")
+  [r, r2].any? { |x| x[:json]&.dig("data")&.values&.any? { |v| !v.nil? } }
+end
+check("J3.0", "guessed names never return data without a token", exposed.empty?, exposed.inspect, bad: "CRITICAL")
+check("J3.1", "Relay node/nodes root fields absent (they bypass per-type authorization)", !hits.include?("node") && !hits.include?("nodes"), hits.inspect, bad: "HIGH")
+rec("J3.2", "guessed names that exist as fields (review: each must be intended and protected)", "INFO", hits.inspect)
+
+# J4: error messages. No class names, file paths, SQL, or stack traces in anything a client can trigger.
+leak = /\.rb\b|\/app\/|\/gems\/|\/lib\/|ActiveRecord|ActionController|PG::|Errno|NoMethodError|NameError|SELECT\s|INSERT\s|#<|backtrace|stack ?trace|Traceback/i
+probes = {
+  "syntax error" => { query: "{ me { " }, "unknown field" => { query: "{ meee }" }, "bad enum/arg type" => { query: "mutation { login(input: 5){ token } }" },
+  "null for required" => { query: LOGIN, variables: { i: nil } }, "bad variable type" => { query: LOGIN, variables: { i: { email: 5, password: [1] } } },
+  "unknown directive" => { query: "{ me @nope { id } }" }, "wrong content" => { query: ME, variables: "[1]" },
+  "deep nesting" => { query: "{ " + "me { " * 300 + "id" + " }" * 300 + " }" }, "huge int" => { query: "mutation { login(input:{email:\"a@b.test\", password:99999999999999999999999}){ token } }" },
+  "unterminated string" => { query: "mutation { login(input:{email:\"abc" }
+}
+leaks = probes.filter_map do |name, b|
+  r = http(body: b, headers: { "Authorization" => "Bearer #{jt}" })
+  name if r[:body].match?(leak)
+end
+check("J4.0", "error answers hold no class names, paths, SQL, or traces", leaks.empty?, leaks.inspect, bad: "HIGH")
+r = signup("a@b.test", "x")
+check("J4.1", "validation errors name the rule, not the implementation", !r[:body].match?(leak), r[:body][0, 160], bad: "MEDIUM")
+
+# J5: query timeout and cost. The heaviest query the complexity limit lets through must still answer fast.
+# (Black-box can only measure; whether a timeout exists is read from the source below.)
+heavy = [60, 40, 20, 10].lazy.map { |n| [n, gql("{ " + (1..n).map { |i| "a#{i}: me { id email }" }.join(" ") + " }", token: jt)] }
+                        .find { |_, r| r[:json]&.dig("data") }
+if heavy
+  n, r = heavy
+  check("J5.0", "heaviest accepted query (#{n} aliased reads) answers in under 3s", r[:ms] < 3_000, "#{r[:ms]}ms", bad: "WEAK")
+else
+  rec("J5.0", "no aliased query got through the complexity limit, nothing to time", "INFO")
+end
+src = File.expand_path("../../../..", __dir__)
+timeout_found = [
+  `grep -rlE "Rack::Timeout|rack-timeout|GraphQL::Schema::Timeout|use GraphQL::Schema::Timeout" #{src}/Gemfile #{src}/app #{src}/config 2>/dev/null`,
+  `grep -rlE "statement_timeout" #{src}/config/database.yml #{src}/config/initializers 2>/dev/null`
+].map(&:strip).reject(&:empty?)
+check("J5.1", "a request or statement timeout is configured (rack-timeout, GraphQL timeout, or statement_timeout)", timeout_found.any?, "none found in Gemfile, app/, config/", bad: "WEAK")
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
@@ -280,6 +522,105 @@ if LABEL == "test"
       check("Z4", "#{kind} #{field['name']}: missing required args -> clean error", clean?(r), r[:body][0, 160])
     end
   end
+  # ---- Z5. Depth limit: find a chain of object fields (needs no required args) and nest it deeper and deeper.
+  # Dormant until the schema has a type that can nest (a cycle, like User -> organization -> users). Then it measures the limit.
+  depth_user = tok_of(signup(uniq))
+  object_fields = ->(t) { (types[t]&.dig("fields") || []).select { |f| f["args"].none? { |a| a["type"]["kind"] == "NON_NULL" } && %w[OBJECT INTERFACE].include?(base.(f["type"])["kind"]) } }
+  chain = lambda do |type_name, n|
+    return [] if n.zero?
+    object_fields.(type_name).each do |f|
+      rest = chain.(base.(f["type"])["name"], n - 1)
+      return [f["name"], *rest] if rest
+    end
+    nil
+  end
+  query_root = roots.find { |k, _| k == "queryType" }&.last
+  path = query_root && chain.(query_root["name"], 15)
+  if path
+    nest = ->(n) { "{ " + path.first(n).map { |f| "#{f} { " }.join + "__typename" + " }" * n + " }" }
+    limit = (1..15).find { |n| gql(nest.(n), token: depth_user)[:body].match?(/depth/i) }
+    check("Z5.0", "query depth is limited (first refused at depth #{limit.inspect})", !limit.nil? && limit <= 12, "refused at #{limit.inspect}", bad: "HIGH")
+    rec("Z5.1", "depth limit measured", "INFO", "first depth refused: #{limit.inspect}")
+  else
+    rec("Z5", "depth limit not testable yet: the schema has no object field that nests 15 deep (add a probe when it does)", "INFO")
+  end
+
+  # ---- Z6. Amount limits: any list or any size-like argument must be capped.
+  count_max = ->(v) { v.is_a?(Array) ? [v.size, *v.map { |x| count_max.(x) }].max : v.is_a?(Hash) ? (v.values.map { |x| count_max.(x) }.max || 0) : 0 }
+  size_args = /\A(first|last|limit|per_?page|page_?size|count|take|size|max|top)\z/i
+  roots.each do |root_key, root|
+    kind = root_key == "queryType" ? "query" : "mutation"
+    (root["fields"] || []).each do |field|
+      listy = ->(t) { t["kind"] == "LIST" || (t["ofType"] && listy.(t["ofType"])) }
+      sized = field["args"].select { |a| a["name"].match?(size_args) }
+      next if sized.empty? && !listy.(field["type"])
+      q, v = op_for.(kind, field, "x")
+      sized.each { |a| v[a["name"]] = 99_999_999 }
+      r = gql(q, variables: v, token: depth_user)
+      check("Z6.#{field['name']}", "#{kind} #{field['name']}: huge #{sized.map { |a| a['name'] }.inspect} is refused or capped (max 100 rows)",
+            clean?(r) && (r[:json]&.dig("errors") || count_max.(r[:json]&.dig("data")) <= 100), r[:body][0, 160], bad: "HIGH")
+      if sized.any? { |a| a["type"]["kind"] != "NON_NULL" }
+        q2, v2 = op_for.(kind, field.merge("args" => field["args"] - sized), "x")
+        r2 = gql(q2, variables: v2, token: depth_user)
+        check("Z6.#{field['name']}.default", "#{kind} #{field['name']}: no size argument still returns a bounded list", clean?(r2) && count_max.(r2[:json]&.dig("data")) <= 100, r2[:body][0, 160], bad: "MEDIUM")
+      end
+    end
+  end
+
+  # ---- Z7. IDOR / BOLA: user B sends user A's real id. The answer must be the same as for an id that does not exist.
+  # Dormant until an operation takes an ID argument.
+  owner = signup(uniq)
+  owner_id = owner[:json]&.dig("data", "signUp", "user", "id")
+  intruder = tok_of(signup(uniq))
+  norm = ->(r) { r[:body].gsub(/[0-9a-f]{8}-[0-9a-f-]{27}|\b\d+\b/i, "ID") }
+  idor_seen = false
+  roots.each do |root_key, root|
+    kind = root_key == "queryType" ? "query" : "mutation"
+    (root["fields"] || []).each do |field|
+      has_id = ->(t) { t["name"] == "ID" || (t["kind"] == "INPUT_OBJECT" && types[t["name"]]["inputFields"].any? { |f| has_id.(base.(f["type"])) }) }
+      next unless field["args"].any? { |a| has_id.(base.(a["type"])) }
+      idor_seen = true
+      q, v = op_for.(kind, field, "x")
+      swap = ->(h, id) { h.to_h { |k, x| [k, x.is_a?(Hash) ? swap.(x, id) : (x.is_a?(String) && x.match?(/\A[0-9a-f-]{36}\z/) ? id : x)] } }
+      mine = gql(q, variables: swap.(v, owner_id), token: intruder)
+      none = gql(q, variables: swap.(v, SecureRandom.uuid), token: intruder)
+      check("Z7.#{field['name']}", "#{kind} #{field['name']}: another user's id answers exactly like a missing id",
+            clean?(mine) && norm.(mine) == norm.(none) && code(mine) == code(none), "#{mine[:body][0, 90]} | #{none[:body][0, 90]}", bad: "CRITICAL")
+    end
+  end
+  rec("Z7", "IDOR probe has nothing to test yet: no operation takes an ID (add two-user scenarios when one does)", "INFO") unless idor_seen
+
+  # ---- Z8. SSRF: a string argument that looks like a URL or host must never make the server call out.
+  # A local canary listens on a random port. If the server connects to it, that is a finding.
+  require "socket"
+  url_args = /url|uri|host|webhook|callback|endpoint|link|domain|address/i
+  ssrf_seen = false
+  canary = TCPServer.new("127.0.0.1", 0)
+  canary_port = canary.addr[1]
+  hits_on_canary = []
+  Thread.new { loop { c = canary.accept; hits_on_canary << c.gets.to_s[0, 60]; c.close } }
+  roots.each do |root_key, root|
+    kind = root_key == "queryType" ? "query" : "mutation"
+    (root["fields"] || []).each do |field|
+      targets = field["args"].select { |a| a["name"].match?(url_args) || (base.(a["type"])["kind"] == "INPUT_OBJECT" && types[base.(a["type"])["name"]]["inputFields"].any? { |f| f["name"].match?(url_args) }) }
+      next if targets.empty?
+      ssrf_seen = true
+      ["http://127.0.0.1:#{canary_port}/ssrf", "http://localhost:#{canary_port}/", "http://[::1]:#{canary_port}/", "http://2130706433:#{canary_port}/",
+       "http://169.254.169.254/latest/meta-data/", "file:///etc/passwd", "gopher://127.0.0.1:#{canary_port}/"].each_with_index do |u, i|
+        q, v = op_for.(kind, field, u)
+        r = gql(q, variables: v, token: depth_user)
+        check("Z8.#{field['name']}.#{i}", "#{kind} #{field['name']}: internal target #{u[0, 30].inspect} not fetched, no 500, no file/metadata in answer",
+              clean?(r) && !r[:body].match?(/root:.*:0:0|ami-id|instance-id/), r[:body][0, 160], bad: "CRITICAL")
+      end
+      sleep 3 # background jobs may fetch late
+    end
+  end
+  if ssrf_seen
+    check("Z8.canary", "the server never connected to the local canary (#{hits_on_canary.size} connections)", hits_on_canary.empty?, hits_on_canary.inspect, bad: "CRITICAL")
+  else
+    rec("Z8", "SSRF probe has nothing to test yet: no operation takes a URL or host argument", "INFO")
+  end
+  canary.close
 else
   rec("Z", "schema phase skipped (introspection is off in this mode, as it should be)", "INFO")
 end

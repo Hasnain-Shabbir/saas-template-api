@@ -24,13 +24,15 @@ Baseline first: `bundle exec rspec`, `bin/rubocop`, `bin/brakeman -q`.
 |---|---|
 | A | Functional regression: signup, login, logout, duplicates, case and spaces, password rules |
 | B | Token attacks: `alg=none`, wrong secret, expired, tampered payload, flipped signature, garbage, wrong scheme |
-| C | Input fuzzing: SQL injection, header injection, XSS and template payloads, look-alike characters, oversized bodies, extra fields |
+| C | Input fuzzing: SQL injection (also blind `pg_sleep` timing and second-order LIKE patterns), header injection, XSS and template payloads (the reset email body is check I24), look-alike characters, oversized bodies, extra fields |
 | D | GraphQL abuse: introspection, suggestions, alias batching, fragment cycles, directive floods, complexity, malformed variables and bodies, wrong content types |
 | E | Timing: known vs unknown email |
 | F | CORS, debug routes, headers, HSTS, Host header |
 | G | Concurrency: parallel signups, logins, logouts |
 | H | Lockout and rate limiting (production mode) |
-| Z | **Schema-driven**: reads the schema, then for every query and mutation tries no token, a garbage token, and nine nasty string values, and checks for 500s. New operations are covered automatically. |
+| I | Password reset (email code): enumeration, guess limit, replay, expiry, races, reset email body |
+| J | OWASP GraphQL cheat sheet: array batching (J1), NoSQL objects and shell metacharacters (J2), guessed field names and `node`/`nodes` (J3), leaks in error messages (J4), query cost and timeout (J5) |
+| Z | **Schema-driven**: reads the schema, then for every query and mutation tries no token, a garbage token, and nine nasty string values, and checks for 500s. New operations are covered automatically. It also has probes that stay dormant (INFO) until the schema has something to test: depth limit (Z5), huge `first`/`limit` and unbounded lists (Z6), IDOR with another user's id (Z7), SSRF with a local canary listener (Z8). |
 | LOG | Production log must contain no inline password, email, or JWT |
 
 `INTERNAL_ERROR` anywhere in a response, or any status of 500, is a finding (the error tracker would also get noise).

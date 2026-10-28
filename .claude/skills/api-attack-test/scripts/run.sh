@@ -18,7 +18,7 @@ PUBLIC_OPS=$(RAILS_ENV=test bin/rails runner 'print Rack::Attack::PUBLIC_OPERATI
 truncate_db
 
 RAILS_ENV=test bin/rails server -p 4001 -b 127.0.0.1 -P "$OUT/t.pid" > "$OUT/server_test.log" 2>&1 &
-SECRET_KEY_BASE=$(openssl rand -hex 64) RAILS_ENV=production APP_HOST=127.0.0.1 FRONTEND_URL=http://localhost:3000 \
+SECRET_KEY_BASE=$(openssl rand -hex 64) RAILS_ENV=production APP_HOST=127.0.0.1 FRONTEND_URL=http://localhost:3000 MAILER_FROM=no-reply@example.test \
   DATABASE_URL="postgresql://$(whoami)@localhost/$DB" bin/rails server -p 4002 -b 127.0.0.1 -P "$OUT/p.pid" > "$OUT/server_prod.log" 2>&1 &
 for i in $(seq 1 30); do
   curl -s -o /dev/null -m1 localhost:4001/up && curl -s -o /dev/null -m1 -H 'Host: 127.0.0.1' localhost:4002/up && break; sleep 1
