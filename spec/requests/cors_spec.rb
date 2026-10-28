@@ -1,7 +1,7 @@
 require "rails_helper"
 
 RSpec.describe "CORS" do
-  let(:allowed_origin) { "http://localhost:3001" }
+  let(:allowed_origin) { ENV.fetch("FRONTEND_URL", "http://localhost:3000") }
 
   def preflight(origin)
     process :options, "/graphql", headers: {
