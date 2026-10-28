@@ -11,6 +11,7 @@ paths:
 - **Errors, two kinds, both kept:**
   - Expected failures are data: `errors { message path code }` with codes `VALIDATION_FAILED`, `CONFLICT`, `INVALID_CREDENTIALS`.
   - Access and lookup problems are top-level errors with `extensions.code`: `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`.
+  - Every top-level error leaves through `GraphqlErrorNormalizer` (called in `GraphqlController`) with one shape: `{ message, path, extensions: { code } }`. Bad variables become `VALIDATION_FAILED` (one error per field, `extensions.value` dropped). Syntax and unknown-field errors become `BAD_REQUEST`. A new error shape from GraphQL-Ruby or a new gem is mapped in the normalizer, never sent to the client as it is. A test per shape is required.
   - **Never return `exception.message` to the client.** Unknown errors become a generic message and go to logs and the error tracker.
 - Tenancy: a record from another organization returns the same `NOT_FOUND` as a missing one.
 - N+1: use the dataloader (or `includes` in a query object). The N+1 test must keep passing.

@@ -11,6 +11,7 @@ This is a multi-tenant SaaS API. Treat user and tenant data as private.
 - No hard-coded emails, ids, or hostnames in code. Use configuration.
 - Authentication emails contain live codes and links. Any stored copy (email log) must be redacted and have a retention period.
 - Never add a public endpoint, a REST route, or a debug tool that is reachable in production without authentication.
+- The GraphQL sandbox (`/sandbox`) is mounted only when `Rails.env.development?`. Never mount it in production or test, not even behind a flag.
 - Never test a security weakness against a real system. Reproduce it locally or in a test.
 
 ## Before calling a security-relevant change done

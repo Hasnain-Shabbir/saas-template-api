@@ -47,3 +47,8 @@ group :development, :test do
   gem "rspec-rails"
   gem "factory_bot_rails"
 end
+
+gem "devise", "~> 5.0"
+gem "devise-jwt", "~> 0.13.0"
+
+gem "graphql", "~> 2.6"
