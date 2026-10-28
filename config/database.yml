@@ -18,6 +18,10 @@ default: &default
   # For details on connection pooling, see Rails configuration guide
   # https://guides.rubyonrails.org/configuring.html#database-pooling
   max_connections: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  # PostgreSQL itself cancels any single query that runs longer than this (milliseconds). Kept below the
+  # 15 second request limit (rack_timeout.rb), so a slow query ends with a clean database error first.
+  variables:
+    statement_timeout: <%= ENV.fetch("DB_STATEMENT_TIMEOUT_MS", 10_000) %>
 
 
 development:
