@@ -40,5 +40,11 @@ module SaasTemplateApi
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # Mail goes to the same named queue as the mail job (see config/sidekiq.yml).
+    config.action_mailer.deliver_later_queue_name = :mailers
+
+    # Job arguments never reach the log ("Enqueued ... with arguments: ...").
+    config.active_job.log_arguments = false
   end
 end

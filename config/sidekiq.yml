@@ -1,0 +1,7 @@
+# Read by `bundle exec sidekiq`. Queue names must match `queue_as` in the jobs.
+# A higher number means that queue is checked more often.
+:max_retries: 5
+:concurrency: <%= ENV.fetch("SIDEKIQ_CONCURRENCY", 5) %>
+:queues:
+  - [mailers, 2]
+  - [default, 1]
