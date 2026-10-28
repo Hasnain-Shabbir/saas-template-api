@@ -16,7 +16,8 @@ Loaded on demand. Only each skill's short description is always in context, and 
 ```
 bin/rails server         # dev server
 bundle exec rspec        # whole suite
-bin/rubocop              # style
+bin/rubocop              # style check
+bin/rubocop -a           # format all Ruby (auto-fix)
 bin/brakeman -q          # security scan
 ```
 

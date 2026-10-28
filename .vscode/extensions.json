@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "Shopify.ruby-lsp",
+    "rubocop.vscode-rubocop",
+    "EditorConfig.EditorConfig"
+  ]
+}
