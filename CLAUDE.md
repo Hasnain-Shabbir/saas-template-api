@@ -9,7 +9,7 @@ Rules that name a tool not installed yet (Pundit, rack-attack, the allowlist for
 ## Skills (`.claude/skills/`)
 Loaded on demand. Only each skill's short description is always in context, and the body loads when it is used.
 - Vendored third party (sources, commits, and patches in `.claude/skills-sources.json`): `graphql-schema`, `postgresql-table-design`, `ruby`, `brakeman`.
-- Our own: `graphql-operation`, `write-tests`, `db-migration-review` (review only), `security-review-backend` (review only).
+- Our own: `graphql-operation`, `write-tests`, `api-attack-test` (run before a push), `db-migration-review` (review only), `security-review-backend` (review only).
 - **Project rules in `.claude/rules/` override vendored skills** when they differ. Known case: the `ruby` skill prefers `fail` over `raise`. This project uses `raise`.
 
 ## Commands

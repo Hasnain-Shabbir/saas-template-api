@@ -6,3 +6,12 @@
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc
 ]
+
+# GraphQL: credentials written inline in the query text, and variables sent as a JSON string, never reach the log.
+# Variables sent as an object are covered by the key filters above. Writes into the value, as ActiveSupport expects.
+Rails.application.config.filter_parameters << lambda do |key, value|
+  next unless value.is_a?(String)
+
+  inline_values = key == "query" && value.include?('"')
+  value.replace("[FILTERED]") if inline_values || key == "variables"
+end

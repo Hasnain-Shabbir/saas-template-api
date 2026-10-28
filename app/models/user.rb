@@ -1,15 +1,27 @@
 class User < ApplicationRecord
   include Devise::JWT::RevocationStrategies::Allowlist
 
-  devise :database_authenticatable, :validatable,
-         :jwt_authenticatable, jwt_revocation_strategy: self
+  devise :database_authenticatable, :validatable, :lockable,
+         :jwt_authenticatable, jwt_revocation_strategy: self,
+         email_regexp: ValidationRules::EMAIL_FORMAT,
+         password_length: ValidationRules::PASSWORD_MIN_LENGTH..ValidationRules::PASSWORD_MAX_BYTES
 
   normalizes :email, with: ->(email) { email.strip.downcase }
+
+  validates :email, length: { maximum: ValidationRules::EMAIL_MAX_LENGTH }
+  validate :password_fits_bcrypt, if: -> { password.present? }
 
   # A new password makes every token issued before it useless.
   after_update :revoke_tokens, if: :saved_change_to_encrypted_password?
 
   private
+
+  # The length range counts characters, but bcrypt cuts at bytes (an emoji is 4 bytes).
+  def password_fits_bcrypt
+    return if password.bytesize <= ValidationRules::PASSWORD_MAX_BYTES
+
+    errors.add(:password, :too_long, count: ValidationRules::PASSWORD_MAX_BYTES)
+  end
 
   def revoke_tokens
     allowlisted_jwts.delete_all

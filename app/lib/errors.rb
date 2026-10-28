@@ -10,11 +10,17 @@ module Errors
   FIELD_REQUIRED = Error.new(code: "VALIDATION_FAILED", message: "is required")
   FIELD_INVALID = Error.new(code: "VALIDATION_FAILED", message: "is invalid")
   BAD_REQUEST = Error.new(code: "BAD_REQUEST", message: "Invalid request")
+  RATE_LIMITED = Error.new(code: "RATE_LIMITED", message: "Too many requests")
   INTERNAL_ERROR = Error.new(code: "INTERNAL_ERROR", message: "Something went wrong")
 
   # Top-level GraphQL error: { message, extensions: { code } }.
   def self.execution_error(error)
     GraphQL::ExecutionError.new(error.message, extensions: { code: error.code })
+  end
+
+  # The JSON body of an error sent outside GraphQL execution (HTTP 400, 429). Same shape as every other error.
+  def self.response_body(error)
+    { errors: [ { message: error.message, extensions: { code: error.code } } ] }
   end
 
   # Failed Result for a service. `errors` carries the model's validation errors, if any.

@@ -6,7 +6,7 @@ paths:
 # GraphQL operations
 
 - Mutations extend `Mutations::BaseMutation` (Relay classic: input object plus `clientMutationId`). Name every operation `<Verb><Noun>`. Never rename one without checking every client that uses it by name.
-- **Default deny.** `BaseMutation#ready?` requires login. Only `login`, `requestPasswordReset`, and `resetPassword` override it, and the list of public operations stays this short. Queries call `current_user!` or `current_organization` first.
+- **Default deny.** `BaseMutation#ready?` requires login. Only `signUp`, `login`, `requestPasswordReset`, and `resetPassword` override it, and the list of public operations stays this short. Every public operation is added to `Rack::Attack::PUBLIC_OPERATIONS` (a spec fails if one is missing). Queries call `current_user!` or `current_organization` first.
 - Every operation authorizes through a Pundit policy (`authorize!(record, :query?)`). A new operation without a permission test is incomplete.
 - **Errors, two kinds, both kept:**
   - Expected failures are data: `errors { message path code }` with codes `VALIDATION_FAILED`, `CONFLICT`, `INVALID_CREDENTIALS`.

@@ -7,6 +7,7 @@ This is a multi-tenant SaaS API. Treat user and tenant data as private.
 - CORS: one explicit origin from configuration (`FRONTEND_URL`). **Never `origins "*"`.**
 - Production: introspection off, depth and complexity limits, throttling on anonymous operations (HTTP 429), `force_ssl`.
 - Sensitive fields: use `encrypts`. For exact-match search use `deterministic: true` or a **keyed HMAC** blind index. **Never** an unkeyed hash (MD5, SHA-1, SHA-256 of the value).
+- Input formats and limits (email regexp, password length, size caps) live in `ValidationRules` (`app/lib/validation_rules.rb`). Never write a regexp or a length limit for user input anywhere else.
 - Secrets live in credentials or environment variables. Never in code, Docker build arguments, image `ENV` lines, or fixtures.
 - No hard-coded emails, ids, or hostnames in code. Use configuration.
 - Authentication emails contain live codes and links. Any stored copy (email log) must be redacted and have a retention period.

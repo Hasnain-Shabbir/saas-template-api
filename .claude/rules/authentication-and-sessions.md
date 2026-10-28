@@ -19,7 +19,7 @@ paths:
 - Login failure, unknown email, and locked account return **one** message and code (`INVALID_CREDENTIALS`). Reset requests always report success. Never reveal whether an email has an account, in the message, the status, or (as far as possible) the timing.
 - Lock after 5 failed attempts for 1 hour (Devise lockable). A reset unlocks the account (documented decision).
 - Reset tokens are single use and expire in 6 hours. Passwords never appear in logs or job arguments.
-- Anonymous operations (sign up, sign in, password reset) are throttled once rate limiting is added. Do not weaken it.
+- Anonymous operations are throttled in `config/initializers/rack_attack.rb` (per IP, one public operation per request). Do not weaken it. Every login failure path (unknown, wrong password, locked) runs bcrypt once, so timing does not leak.
 - Secrets (the devise-jwt secret) live in credentials. Never print or copy them (see `no-env-access.md`).
 
 ## Required negative tests (keep them passing)

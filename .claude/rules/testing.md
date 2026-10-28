@@ -14,6 +14,7 @@ This project uses RSpec with FactoryBot (no fixtures).
 - Factories: build the smallest valid record. Add traits for roles instead of editing the base factory.
 - No real network and no sleeping. Use `travel` for time.
 - Rate-limit tests swap in a memory store and restore the null store afterwards.
+- After adding or changing an operation, auth, limits, or config, and before a push, run the `api-attack-test` skill.
 - Run the whole suite, `bin/rubocop`, and `bin/brakeman -q` before saying a change is done. Report failures with their output. Never claim green without running.
 
 ## Commands

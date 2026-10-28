@@ -208,4 +208,56 @@ RSpec.describe "Auth operations", type: :request do
       expect(body["errors"].first).to include("message" => "Something went wrong", "extensions" => { "code" => "INTERNAL_ERROR" })
     end
   end
+
+  describe "lockout" do
+    def invalid_credentials?(body)
+      body.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS" && body.dig("data", "login", "token").nil?
+    end
+
+    it "locks the account after 5 wrong passwords, even for the right password" do
+      5.times { login_with(password: "wrong password 1") }
+
+      body = login_with
+
+      expect(invalid_credentials?(body)).to be(true)
+    end
+
+    it "answers a locked account exactly like a wrong password and an unknown email" do
+      5.times { login_with(password: "wrong password 1") }
+      locked = login_with
+      wrong = login_with(email: create(:user).email, password: "wrong password 1")
+      unknown = login_with(email: "nobody@example.test", password: "wrong password 1")
+
+      expect([ locked, wrong, unknown ].uniq.size).to eq(1)
+    end
+
+    it "unlocks after an hour" do
+      5.times { login_with(password: "wrong password 1") }
+
+      travel 61.minutes
+
+      expect(login_with.dig("data", "login", "token")).to be_present
+    end
+
+    it "does not lock early, and a good login resets the counter" do
+      4.times { login_with(password: "wrong password 1") }
+      expect(login_with.dig("data", "login", "token")).to be_present
+
+      4.times { login_with(password: "wrong password 1") }
+
+      expect(login_with.dig("data", "login", "token")).to be_present
+    end
+  end
+
+  describe "token storage" do
+    it "removes expired allowlist rows of the user when a new token is issued" do
+      user.allowlisted_jwts.create!(jti: "old", exp: 1.minute.ago)
+      user.allowlisted_jwts.create!(jti: "live", exp: 1.hour.from_now)
+
+      Auth::IssueToken.call(user)
+
+      expect(user.allowlisted_jwts.pluck(:jti)).not_to include("old")
+      expect(user.allowlisted_jwts.pluck(:jti)).to include("live")
+    end
+  end
 end

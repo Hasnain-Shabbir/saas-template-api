@@ -27,8 +27,12 @@ class SaasTemplateApiSchema < GraphQL::Schema
   end
 
   # Limit the depth and size of incoming queries:
-  max_depth(15)
-  max_query_string_tokens(5000)
+  max_depth(8, count_introspection_fields: false)
+  max_complexity(200, count_introspection_fields: false)
+  max_query_string_tokens(2000)
+
+  # Clients get the schema from the docs, not from the live API.
+  disable_introspection_entry_points if Rails.env.production?
 
   # Stop validating when it encounters this many errors:
   validate_max_errors(100)
