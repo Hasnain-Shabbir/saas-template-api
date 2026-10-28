@@ -1,6 +1,6 @@
 class Rack::Attack
   # Mutations an anonymous caller can reach (the ones that override `ready?`). A spec fails if this list drifts.
-  PUBLIC_OPERATIONS = %w[login signUp].freeze
+  PUBLIC_OPERATIONS = %w[login signUp requestPasswordReset resetPassword].freeze
   MAX_BODY_BYTES = 100 * 1024
 
   # Parse the GraphQL POST body once per request and remember it in the Rack env.

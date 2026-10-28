@@ -5,5 +5,7 @@ module Types
     field :sign_up, mutation: Mutations::Auth::SignUp
     field :login, mutation: Mutations::Auth::Login
     field :logout, mutation: Mutations::Auth::Logout
+    field :request_password_reset, mutation: Mutations::Auth::RequestPasswordReset
+    field :reset_password, mutation: Mutations::Auth::ResetPassword
   end
 end

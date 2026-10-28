@@ -6,7 +6,8 @@ module Errors
 
   UNAUTHENTICATED = Error.new(code: "UNAUTHENTICATED", message: "Authentication required")
   INVALID_CREDENTIALS = Error.new(code: "INVALID_CREDENTIALS", message: "Invalid email or password")
-  VALIDATION_FAILED = Error.new(code: "VALIDATION_FAILED", message: "Validation failed")
+  INVALID_CODE = Error.new(code: "INVALID_CODE", message: "This code is invalid or has expired")
+  VALIDATION_FAILED =Error.new(code: "VALIDATION_FAILED", message: "Validation failed")
   FIELD_REQUIRED = Error.new(code: "VALIDATION_FAILED", message: "is required")
   FIELD_INVALID = Error.new(code: "VALIDATION_FAILED", message: "is invalid")
   BAD_REQUEST = Error.new(code: "BAD_REQUEST", message: "Invalid request")

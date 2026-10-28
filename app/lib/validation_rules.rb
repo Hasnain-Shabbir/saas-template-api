@@ -10,4 +10,7 @@ module ValidationRules
 
   PASSWORD_MIN_LENGTH = 10
   PASSWORD_MAX_BYTES = 72 # bcrypt ignores everything after 72 bytes, so a longer password would be a lie
+
+  OTP_LENGTH = 6 # digits
+  OTP_FORMAT = /\A\d{#{OTP_LENGTH}}\z/
 end
