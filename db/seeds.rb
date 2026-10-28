@@ -1,9 +1,14 @@
-# This file should ensure the existence of records required to run the application in every environment (production,
-# development, test). The code here should be idempotent so that it can be executed at any point in every environment.
-# The data can then be loaded with the bin/rails db:seed command (or created alongside the database with db:setup).
-#
-# Example:
-#
-#   ["Action", "Comedy", "Drama", "Horror"].each do |genre_name|
-#     MovieGenre.find_or_create_by!(name: genre_name)
-#   end
+# Creates the first super_admin from configuration. No credential lives in the repo:
+# set SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD in the environment, then run bin/rails db:seed.
+# Safe to run again: an existing user is never changed (no role change, no new password).
+email = ENV["SUPER_ADMIN_EMAIL"].presence
+password = ENV["SUPER_ADMIN_PASSWORD"].presence
+
+if email && password
+  User.find_or_create_by!(email:) do |user|
+    user.password = password
+    user.role = :super_admin
+  end
+else
+  puts "Skipped the super admin: set SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD."
+end
