@@ -31,3 +31,6 @@
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 
+# Ignore the local working plan (the README is the shared document).
+/PLAN.md
+
