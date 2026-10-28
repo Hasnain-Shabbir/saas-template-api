@@ -3,8 +3,12 @@
 #   mint     delete the user's code, issue a fresh one, print the plain code (the email would carry it)
 #   expire   make the user's code expired
 #   mail     mint a code, build the reset email and print its HTML body, a marker line, then its text body (nothing is sent)
-#   attempts print the wrong-guess count of the user's code, or "nil" when there is none
+#   attempts print the wrong-guess count of the user's password reset code, or "nil" when there is none
 #   role     print the user's role (the API does not expose it, so the database is the only witness)
+#   ec_mint  EMAIL NEW_EMAIL  set the pending email, issue an email_change code, print the plain code (the new inbox)
+#   ec_expire  make the user's email_change code expired
+#   ec_state print JSON: email, pending, previous, code present, attempts, locked, failed attempts, token count
+#   ec_mail  EMAIL NEW_EMAIL  like ec_mint, but print the code mail (html, marker line, text) instead of the code
 abort "test database only" unless Rails.env.test?
 
 action, email = ARGV
@@ -22,9 +26,25 @@ when "mail"
   mail = PasswordMailer.reset_password_code(user, code)
   print mail.html_part.body.decoded, "\n----TEXT----\n", mail.text_part.body.decoded
 when "attempts"
-  print OneTimeCode.find_by(user_id: user.id)&.attempts.inspect
+  print OneTimeCode.find_by(user_id: user.id, purpose: "password_reset")&.attempts.inspect
 when "role"
   print user.role
+when "ec_mint", "ec_mail"
+  OneTimeCode.where(user_id: user.id, purpose: "email_change").delete_all
+  user.update!(pending_email: ARGV[2])
+  code = Auth::IssueOneTimeCode.call(user: user, purpose: :email_change).value
+  if action == "ec_mint"
+    print code
+  else
+    mail = EmailChangeMailer.change_code(user, code)
+    print mail.html_part.body.decoded, "\n----TEXT----\n", mail.text_part.body.decoded
+  end
+when "ec_expire"
+  OneTimeCode.where(user_id: user.id, purpose: "email_change").update_all(expires_at: 1.minute.ago)
+when "ec_state"
+  code = OneTimeCode.find_by(user_id: user.id, purpose: "email_change")
+  print JSON.generate(email: user.email, pending: user.pending_email, previous: user.previous_email, code: !code.nil?,
+                      attempts: code&.attempts, locked: user.access_locked?, failed: user.failed_attempts, tokens: user.allowlisted_jwts.count)
 else
   abort "unknown action"
 end

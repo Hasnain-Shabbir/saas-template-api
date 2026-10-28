@@ -278,7 +278,7 @@ def req_reset(email, extra = {}) = gql(REQ_RESET, variables: { i: { email: email
 def do_reset(email, otp_code, pw = NEW_PW) = gql(DO_RESET, variables: { i: { email: email, code: otp_code, password: pw } })
 def reset_ok?(r) = r[:json]&.dig("data", "resetPassword", "success") == true
 def reset_code(r) = r[:json]&.dig("data", "resetPassword", "errors", 0, "code")
-def otp(action, email) = IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", OTP_HELPER, action, email ], chdir: ROOT, err: File::NULL, &:read).to_s.strip
+def otp(action, email, *rest) = IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", OTP_HELPER, action, email, *rest ], chdir: ROOT, err: File::NULL, &:read).to_s.strip
 def wrong_guess(real) = real == "000000" ? "111111" : "000000"
 
 rv = uniq
@@ -290,8 +290,9 @@ check("I1", "requestPasswordReset: known and unknown email give the same answer"
 check("I2", "requestPasswordReset is on the public (throttled) list", PUBLIC_OPS.include?("requestPasswordReset") && PUBLIC_OPS.include?("resetPassword"), PUBLIC_OPS.inspect, bad: "HIGH")
 odd = [ "not-an-email", "", "x" * 5000, "' OR 1=1 --", "a@b.test\r\nBcc: evil@x.test", "‮@x.test" ]
 odd_res = odd.map { |s| req_reset(s) }
-check("I3", "requestPasswordReset with odd input: clean, same answer as unknown email",
-      odd_res.all? { |x| clean?(x) && x[:json] == unknown[:json] }, odd_res.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "MEDIUM")
+# Accepted decision (see password_reset_spec): a malformed email is VALIDATION_FAILED, which says nothing about accounts.
+check("I3", "requestPasswordReset with odd input: clean, and the same answer as an unknown email or a plain VALIDATION_FAILED",
+      odd_res.all? { |x| clean?(x) && (x[:json] == unknown[:json] || x[:json]&.dig("data", "requestPasswordReset", "errors", 0, "code") == "VALIDATION_FAILED") }, odd_res.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "MEDIUM")
 aliases = (1..200).map { |i| "a#{i}: requestPasswordReset(input:{email:\"#{uniq}\"}){ success }" }.join(" ")
 r = gql("mutation { #{aliases} }")
 check("I4", "200 aliased reset requests in ONE request are refused", r[:status] == 400 || (r[:status] == 200 && !r[:json]&.dig("data")), "status=#{r[:status]} #{r[:body][0, 100]}", bad: "HIGH")
@@ -498,6 +499,181 @@ check("K6", "a member can log out, and the token is dead afterwards",
       k_out[:json]&.dig("data", "logout", "success") == true && code(gql(ME, token: k_tok)) == "UNAUTHENTICATED", k_out[:body][0, 120])
 k_forbidden = [ gql(ME), gql(LOGOUT) ].map { |x| code(x) }
 check("K7", "no token gives UNAUTHENTICATED, never FORBIDDEN or data", k_forbidden == %w[UNAUTHENTICATED UNAUTHENTICATED], k_forbidden.inspect, bad: "HIGH")
+
+# ---------- L. Email change (OTP to the new address) ----------
+# Black-box checks run in both modes. The ones that need the code (the "new inbox") or the database run in test mode only.
+REQ_EC  = "mutation R($i: RequestEmailChangeInput!){ requestEmailChange(input:$i){ success errors{message path code} } }"
+CONF_EC = "mutation C($i: ConfirmEmailChangeInput!){ confirmEmailChange(input:$i){ success errors{message path code} } }"
+
+def req_ec(token, new_email, pw = PW, extra = {}) = gql(REQ_EC, variables: { i: { newEmail: new_email, password: pw }.merge(extra) }, token: token)
+def conf_ec(token, otp_code, extra = {}) = gql(CONF_EC, variables: { i: { code: otp_code }.merge(extra) }, token: token)
+def ec_ok?(r) = r[:json]&.dig("data", "confirmEmailChange", "success") == true
+def ec_err(r) = r[:json]&.dig("data", "confirmEmailChange", "errors", 0, "code")
+def req_err(r) = r[:json]&.dig("data", "requestEmailChange", "errors", 0, "code")
+def ec_state(email) = (JSON.parse(otp("ec_state", email)) rescue {})
+
+ea = uniq
+ta = tok_of(signup(ea))
+eb = uniq
+tb = tok_of(signup(eb))
+
+none = [ req_ec(nil, uniq), conf_ec(nil, "123456"), req_ec("garbage", uniq), conf_ec("garbage", "123456") ]
+check("L1", "requestEmailChange and confirmEmailChange: no token or a garbage token is UNAUTHENTICATED",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+wrong = req_ec(ta, uniq, "wrong-password-x")
+check("L2", "wrong password: INVALID_CREDENTIALS, same text as login", req_err(wrong) == "INVALID_CREDENTIALS", wrong[:body][0, 140], bad: "HIGH")
+
+free_a = req_ec(ta, uniq)
+taken_a = req_ec(tb, ea) # ea belongs to user A, so it is taken for user B
+check("L3", "free and taken new email: exactly the same answer", free_a[:json] == taken_a[:json] && free_a[:json]&.dig("data", "requestEmailChange", "success") == true,
+      "#{free_a[:body][0, 100]} | #{taken_a[:body][0, 100]}", bad: "HIGH")
+
+bad_emails = [ "not-an-email", "", "x" * 5000, "' OR 1=1 --", "x'; DROP TABLE users;--@example.test", "a@b.test\r\nBcc: evil@x.test", "‮@x.test", "аdmin@example.test", "a@exаmple.test" ]
+bad_res = bad_emails.map { |s| req_ec(ta, s) }
+check("L4", "odd newEmail values: clean, VALIDATION_FAILED, never success",
+      bad_res.all? { |x| clean?(x) && !x[:json]&.dig("data", "requestEmailChange", "success") }, bad_res.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "MEDIUM")
+
+r1 = req_ec(ta, uniq, PW, { role: "super_admin", id: SecureRandom.uuid, email: uniq })
+r2 = conf_ec(ta, "123456", { role: "super_admin", userId: SecureRandom.uuid, pendingEmail: uniq })
+check("L5", "extra input fields on both mutations are rejected", [ r1, r2 ].all? { |x| x[:json]&.dig("errors") && clean?(x) }, "#{r1[:body][0, 80]} | #{r2[:body][0, 80]}", bad: "MEDIUM")
+
+multi = gql("mutation { a: confirmEmailChange(input:{code:\"000000\"}){ success } b: confirmEmailChange(input:{code:\"111111\"}){ success } }", token: ta)
+check("L6", "2 aliased confirmEmailChange in ONE request are refused (no guess multiplying)", multi[:status] == 400 && !multi[:body].include?("success"), "status=#{multi[:status]} #{multi[:body][0, 100]}", bad: "HIGH")
+many = (1..100).map { |i| "a#{i}: requestEmailChange(input:{newEmail:\"#{uniq}\", password:\"wrong-password-#{i}\"}){ success }" }.join(" ")
+r = gql("mutation { #{many} }", token: ta)
+check("L7", "100 aliased requestEmailChange (password guesses) in ONE request are refused", r[:status] == 400 || !r[:json]&.dig("data"), "status=#{r[:status]} #{r[:body][0, 100]}", bad: "CRITICAL")
+
+if LABEL == "prod"
+  t_free = avg(6) { req_ec(ta, uniq)[:ms] }
+  t_taken = avg(6) { req_ec(ta, eb)[:ms] }
+  check("L8", "requestEmailChange timing, free vs taken email", (t_free - t_taken).abs < [ t_free, t_taken ].max * 0.4 + 15, "free=#{t_free.round}ms taken=#{t_taken.round}ms", bad: "WEAK")
+  $pinned_ip = "10.88.77.66"
+  codes = 12.times.map { conf_ec(ta, "000000")[:status] }
+  r = conf_ec(ta, "000000")
+  check("L9", "email change operations are throttled per IP (10 per hour): 429 RATE_LIMITED with Retry-After",
+        codes.count(429) >= 1 && r[:status] == 429 && code(r) == "RATE_LIMITED" && r[:headers]["retry-after"].to_i.positive?, "statuses=#{codes.tally} #{r[:body][0, 80]}", bad: "HIGH")
+  $pinned_ip = nil
+end
+
+if LABEL == "test"
+  fresh = -> { e = uniq; t = tok_of(signup(e)); [ e, t ] }
+
+  # --- password check and lockout (a stolen token must not be able to guess the password)
+  e, t = fresh.call
+  7.times { req_ec(t, uniq, "wrong-password-#{rand(1000)}") } # a new IP each time: only a per-account limit can stop this
+  st = ec_state(e)
+  check("L10", "7 wrong passwords through ONE valid token lock the account (per-account limit, not only per-IP)", st["locked"] == true,
+        "locked=#{st['locked']} failed_attempts=#{st['failed']}", bad: "HIGH")
+  after = gql(ME, token: t)
+  check("L37", "the token of the locked account answers 200 UNAUTHENTICATED like a garbage token, and never says it is locked",
+        after[:status] == 200 && code(after) == "UNAUTHENTICATED" && after[:json] == gql(ME, token: "not.a.token")[:json] && !after[:body].match?(/lock/i), after[:body][0, 120], bad: "MEDIUM")
+  right = req_ec(t, uniq)
+  check("L11", "after those guesses the right password is still checked (no free pass, no 500)", clean?(right), right[:body][0, 100], bad: "MEDIUM")
+
+  # --- happy path: the code goes to the new address only, the login email does not change before the code
+  e, session = fresh.call
+  other_session = tok_of(login(e), "login")
+  new_e = uniq
+  r = req_ec(session, new_e)
+  st = ec_state(e)
+  check("L12", "request alone changes nothing: login email unchanged", r[:json]&.dig("data", "requestEmailChange", "success") == true && st["email"] == e, st.inspect, bad: "HIGH")
+  c = otp("ec_mint", e, new_e)
+  check("L14", "helper issued a 6-digit email_change code", c.match?(/\A\d{6}\z/), c.inspect)
+  mail = otp("ec_mail", e, new_e)
+  body = mail.to_s
+  check("L15", "code mail: only the code, no current address, no password, no link (also the XSS check for the template)",
+        !body.include?(e) && !body.match?(/https?:\/\//) && !body.include?(PW), body[0, 160], bad: "MEDIUM")
+  c = otp("ec_mint", e, new_e)
+  r = conf_ec(session, c)
+  check("L16", "confirm with the right code works", ec_ok?(r), r[:body][0, 160], bad: "HIGH")
+  check("L17", "the new email logs in, the old email does not", tok_of(login(new_e), "login") && !tok_of(login(e), "login"), bad: "HIGH")
+  check("L18", "the session that confirmed still works and shows the new email", gql(ME, token: session)[:json]&.dig("data", "me", "email") == new_e, bad: "MEDIUM")
+  check("L19", "every OTHER session is dead after the change", code(gql(ME, token: other_session)) == "UNAUTHENTICATED", bad: "HIGH")
+  replay = conf_ec(session, c)
+  check("L20", "replay of the used code is refused", ec_err(replay) == "INVALID_CODE" && !ec_ok?(replay), replay[:body][0, 160], bad: "CRITICAL")
+  st = ec_state(new_e)
+  check("L21", "after the change: no code left, pending cleared", st["code"] == false && st["pending"].nil?, st.inspect, bad: "MEDIUM")
+
+  # --- guess limit: 5 wrong guesses from 5 IPs kill the code
+  e, t = fresh.call
+  new_e = uniq
+  c = otp("ec_mint", e, new_e)
+  five = 5.times.map { conf_ec(t, wrong_guess(c)) }
+  check("L22", "5 wrong guesses (5 IPs) kill the code, even the right code is refused after, email unchanged",
+        five.all? { |x| ec_err(x) == "INVALID_CODE" } && ec_err(conf_ec(t, c)) == "INVALID_CODE" && ec_state(e)["code"] == false && ec_state(e)["email"] == e, ec_state(e).inspect, bad: "CRITICAL")
+
+  e, t = fresh.call
+  c = otp("ec_mint", e, uniq)
+  four = 4.times.map { conf_ec(t, wrong_guess(c)) }
+  check("L23", "4 wrong guesses do not kill the code", four.all? { |x| ec_err(x) == "INVALID_CODE" } && ec_state(e)["attempts"] == 4, ec_state(e).inspect, bad: "MEDIUM")
+
+  # --- expiry, format, cross purpose
+  e, t = fresh.call
+  c = otp("ec_mint", e, uniq)
+  otp("ec_expire", e)
+  r = conf_ec(t, c)
+  check("L24", "an expired code is refused", ec_err(r) == "INVALID_CODE" && !ec_ok?(r), r[:body][0, 140], bad: "CRITICAL")
+
+  bad_codes = [ "", "12345", "1234567", "123456\n", " 123456", "１２３４５６", "1e5000", "0x1234", "' OR 1=1 --", "x" * 10_000, "123456" * 1000 ]
+  bad_res = bad_codes.map { |x| conf_ec(t, x) }
+  check("L25", "codes in a wrong format: clean INVALID_CODE", bad_res.all? { |x| clean?(x) && ec_err(x) == "INVALID_CODE" }, bad_res.map { |x| x[:status] }.tally.inspect, bad: "MEDIUM")
+
+  e, t = fresh.call
+  pr = otp("mint", e) # a password reset code
+  r = conf_ec(t, pr)
+  check("L26", "a password reset code cannot confirm an email change", ec_err(r) == "INVALID_CODE" && !ec_ok?(r), r[:body][0, 140], bad: "CRITICAL")
+  ec = otp("ec_mint", e, uniq)
+  r = do_reset(e, ec, "Other-Passw0rd-7!")
+  check("L27", "an email change code cannot reset the password", reset_code(r) == "INVALID_CODE" && !reset_ok?(r), r[:body][0, 140], bad: "CRITICAL")
+  check("L28", "a wrong guess with an email change code counts only against the password reset code, and does not delete either code",
+        ec_state(e)["code"] == true && otp("attempts", e) == "1", otp("attempts", e), bad: "LOW")
+
+  # --- another user cannot use this code
+  victim, tv = fresh.call
+  intruder, ti = fresh.call
+  new_e = uniq
+  c = otp("ec_mint", victim, new_e)
+  r = conf_ec(ti, c)
+  check("L29", "another logged-in user with the victim's code: INVALID_CODE, own email unchanged", ec_err(r) == "INVALID_CODE" && ec_state(intruder)["email"] == intruder, r[:body][0, 120], bad: "CRITICAL")
+  check("L30", "the intruder's try did not spend a guess of the victim's code", ec_state(victim)["attempts"] == 0, ec_state(victim).inspect, bad: "MEDIUM")
+  check("L31", "the victim can still confirm", ec_ok?(conf_ec(tv, c)), bad: "MEDIUM")
+
+  # --- races and taken-in-the-meantime
+  e, t = fresh.call
+  new_e = uniq
+  c = otp("ec_mint", e, new_e)
+  rs = 8.times.map { Thread.new { conf_ec(t, c) } }.map(&:value)
+  check("L32", "8 parallel confirms with the same right code: exactly one succeeds, no 500", rs.count { |x| ec_ok?(x) } == 1 && rs.all? { |x| clean?(x) }, rs.map { |x| x[:body][0, 70] }.tally.inspect, bad: "HIGH")
+
+  e, t = fresh.call
+  new_e = uniq
+  c = otp("ec_mint", e, new_e)
+  signup(new_e) # someone registers the address after the code was sent
+  r = conf_ec(t, c)
+  check("L33", "address taken in the meantime: INVALID_CODE (no hint), login email unchanged, no takeover of the other account",
+        ec_err(r) == "INVALID_CODE" && ec_state(e)["email"] == e && ec_state(new_e)["email"] == new_e, r[:body][0, 120], bad: "HIGH")
+
+  # two users race for the same free address with their own valid codes
+  e1, t1 = fresh.call
+  e2, t2 = fresh.call
+  shared = uniq
+  c1 = otp("ec_mint", e1, shared)
+  c2 = otp("ec_mint", e2, shared)
+  rs = [ Thread.new { conf_ec(t1, c1) }, Thread.new { conf_ec(t2, c2) } ].map(&:value)
+  check("L34", "two users confirm the same new address at once: exactly one wins, no 500, no duplicate email",
+        rs.count { |x| ec_ok?(x) } == 1 && rs.all? { |x| clean?(x) }, rs.map { |x| x[:body][0, 70] }.inspect, bad: "HIGH")
+
+  # --- a request inside the cooldown must not re-point an already mailed code
+  e, t = fresh.call
+  first, second = uniq, uniq
+  c = otp("ec_mint", e, first) # first address got its code just now
+  req_ec(t, second)
+  st = ec_state(e)
+  check("L35", "second request inside 60 s does not move the pending address away from the one that got the code",
+        st["pending"] == first && st["code"] == true, st.inspect, bad: "HIGH")
+  check("L36", "...so that code still opens the first address", ec_ok?(conf_ec(t, c)) && ec_state(first)["email"] == first, bad: "HIGH")
+end
 
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"

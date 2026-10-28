@@ -34,15 +34,18 @@ curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application
 TOKEN=$(curl -s -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.2' \
   -d "{\"query\":\"mutation{login(input:{email:\\\"$MARK@example.test\\\",password:\\\"PW-$MARK-long-enough\\\"}){token}}\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H "Authorization: Bearer $TOKEN" -d '{"query":"{me{id}}"}'
+curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.3' \
+  -d "{\"query\":\"mutation(\$i: ResetPasswordInput!){resetPassword(input:\$i){success}}\",\"variables\":{\"i\":{\"email\":\"x@example.test\",\"code\":\"CODE-$MARK\",\"password\":\"PW-$MARK-other\"}}}"
 sleep 1
 {
   echo "LOG1 inline password in log:  $(grep -c "PW-$MARK" "$OUT/server_prod.log")  (want 0)"
   echo "LOG2 inline email in log:     $(grep -c "$MARK@example" "$OUT/server_prod.log")  (want 0)"
   echo "LOG3 JWT in log:              $( [ -n "$TOKEN" ] && grep -c "${TOKEN:0:40}" "$OUT/server_prod.log" || echo 0)  (want 0)"
   echo "LOG4 'Bearer ' in log:        $(grep -c 'Bearer ' "$OUT/server_prod.log")  (want 0)"
+  echo "LOG6 one-time code variable:  $(grep -c "CODE-$MARK" "$OUT/server_prod.log")  (want 0)"
   echo "LOG5 stack traces for 500s:   $(grep -c 'Puma caught this error' "$OUT/server_test.log")  (want 0)"
 } | tee "$OUT/log_check.txt"
 
 echo; for f in test prod; do tail -1 "$OUT/$f.out"; done
-echo; echo "Problems (anything not PASS/INFO):"; grep -hE '^\[(FAIL|CRITICAL|WEAK|CHECK)\]' "$OUT/test.out" "$OUT/prod.out" | cut -c1-260
+echo; echo "Problems (anything not PASS/INFO):"; grep -hE '^\[(FAIL|CRITICAL|HIGH|MEDIUM|LOW|WEAK|CHECK)\]' "$OUT/test.out" "$OUT/prod.out" | cut -c1-260
 echo; echo "Full output: $OUT/test.out, $OUT/prod.out, $OUT/log_check.txt"
