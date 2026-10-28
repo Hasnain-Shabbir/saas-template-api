@@ -1,6 +1,7 @@
 module Mutations
   class BaseMutation < GraphQL::Schema::RelayClassicMutation
     include Authenticatable
+    include Authorizable
 
     argument_class Types::BaseArgument
     field_class Types::BaseField

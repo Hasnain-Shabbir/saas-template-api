@@ -4,6 +4,7 @@
 #   expire   make the user's code expired
 #   mail     mint a code, build the reset email and print its HTML body, a marker line, then its text body (nothing is sent)
 #   attempts print the wrong-guess count of the user's code, or "nil" when there is none
+#   role     print the user's role (the API does not expose it, so the database is the only witness)
 abort "test database only" unless Rails.env.test?
 
 action, email = ARGV
@@ -22,6 +23,8 @@ when "mail"
   print mail.html_part.body.decoded, "\n----TEXT----\n", mail.text_part.body.decoded
 when "attempts"
   print OneTimeCode.find_by(user_id: user.id)&.attempts.inspect
+when "role"
+  print user.role
 else
   abort "unknown action"
 end

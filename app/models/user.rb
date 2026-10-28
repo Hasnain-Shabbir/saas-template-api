@@ -6,6 +6,10 @@ class User < ApplicationRecord
          email_regexp: ValidationRules::EMAIL_FORMAT,
          password_length: ValidationRules::PASSWORD_MIN_LENGTH..ValidationRules::PASSWORD_MAX_BYTES
 
+  # The one place roles are defined. A new role is added here and in a migration that changes the
+  # `users_role_values` CHECK constraint. Permissions of a role live in the policies, not here.
+  enum :role, { super_admin: "super_admin", member: "member" }, default: :member, validate: true
+
   normalizes :email, with: ->(email) { email.strip.downcase }
 
   validates :email, length: { maximum: ValidationRules::EMAIL_MAX_LENGTH }

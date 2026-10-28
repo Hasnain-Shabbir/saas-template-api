@@ -5,6 +5,7 @@ module Errors
   Error = Data.define(:code, :message)
 
   UNAUTHENTICATED = Error.new(code: "UNAUTHENTICATED", message: "Authentication required")
+  FORBIDDEN = Error.new(code: "FORBIDDEN", message: "You are not allowed to do this")
   INVALID_CREDENTIALS = Error.new(code: "INVALID_CREDENTIALS", message: "Invalid email or password")
   INVALID_CODE = Error.new(code: "INVALID_CODE", message: "This code is invalid or has expired")
   VALIDATION_FAILED =Error.new(code: "VALIDATION_FAILED", message: "Validation failed")

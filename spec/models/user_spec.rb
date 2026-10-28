@@ -84,6 +84,42 @@ RSpec.describe User do
     end
   end
 
+  describe "role" do
+    it "defaults to member" do
+      expect(described_class.new.role).to eq("member")
+      expect(create(:user)).to be_member
+    end
+
+    it "knows exactly super_admin and member" do
+      expect(described_class.roles.keys).to eq(%w[super_admin member])
+    end
+
+    it "stores the role as a string" do
+      user = create(:user, :super_admin)
+
+      expect(described_class.connection.select_value("SELECT role FROM users WHERE id = '#{user.id}'")).to eq("super_admin")
+    end
+
+    it "rejects an unknown role with a validation error, not an exception" do
+      user = build(:user, role: "owner")
+
+      expect(user).not_to be_valid
+      expect(user.errors.attribute_names).to include(:role)
+    end
+
+    it "refuses an unknown role in the database too" do
+      user = create(:user)
+
+      expect { user.update_column(:role, "owner") }.to raise_error(ActiveRecord::StatementInvalid, /users_role_values/)
+    end
+
+    it "refuses a null role in the database" do
+      user = create(:user)
+
+      expect { user.update_column(:role, nil) }.to raise_error(ActiveRecord::NotNullViolation)
+    end
+  end
+
   describe "locking" do
     let(:user) { create(:user) }
 

@@ -55,3 +55,5 @@ gem "devise", "~> 5.0"
 gem "devise-jwt", "~> 0.13.0"
 
 gem "graphql", "~> 2.6"
+
+gem "pundit", "~> 2.5"

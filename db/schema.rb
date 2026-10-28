@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_28_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_28_110001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -46,8 +46,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_28_100000) do
     t.datetime "updated_at", null: false
     t.integer "failed_attempts", default: 0, null: false
     t.datetime "locked_at"
+    t.string "role", default: "member", null: false
     t.index ["email"], name: "index_users_on_email", unique: true
     t.check_constraint "char_length(email::text) <= 254", name: "users_email_length"
+    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying, 'member'::character varying]::text[])", name: "users_role_values"
   end
 
   add_foreign_key "allowlisted_jwts", "users", on_delete: :cascade

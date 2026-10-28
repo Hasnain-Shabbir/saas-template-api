@@ -471,6 +471,34 @@ timeout_found = [
 ].map(&:strip).reject(&:empty?)
 check("J5.1", "a request or statement timeout is configured (rack-timeout, GraphQL timeout, or statement_timeout)", timeout_found.any?, "none found in Gemfile, app/, config/", bad: "WEAK")
 
+# ---------- K. Roles and authorization ----------
+# The role is never exposed and never an input. The only way to see it is the database (otp_helper "role").
+def role_of(email) = otp("role", email)
+
+k_email = uniq
+k_res = gql(SIGNUP, variables: { i: { email: k_email, password: PW, role: "super_admin" } })
+check("K1", "signUp with an extra `role` input is rejected and creates no user",
+      k_res[:json]&.dig("errors") && !tok_of(k_res) && otp("role", k_email).empty?, k_res[:body][0, 160], bad: "CRITICAL")
+
+k_email = uniq
+signup(k_email)
+check("K2", "a normal signUp creates a member", role_of(k_email) == "member", role_of(k_email), bad: "CRITICAL")
+
+k_res = gql(LOGIN, variables: { i: { email: k_email, password: PW, role: "super_admin" } })
+check("K3", "login with an extra `role` input is rejected", k_res[:json]&.dig("errors") && !tok_of(k_res, "login"), k_res[:body][0, 160], bad: "HIGH")
+check("K4", "role is still member after the attempts above", role_of(k_email) == "member", role_of(k_email), bad: "CRITICAL")
+
+k_tok = tok_of(login(k_email), "login")
+k_me = gql(ME, token: k_tok)
+check("K5", "a member can read only themselves with me", k_me[:json]&.dig("data", "me", "email") == k_email, k_me[:body][0, 120])
+k_role = gql("{ me { role } }", token: k_tok)
+check("K5b", "me tells the frontend the role (MEMBER for a new user)", k_role[:json]&.dig("data", "me", "role") == "MEMBER", k_role[:body][0, 120])
+k_out = gql(LOGOUT, token: k_tok)
+check("K6", "a member can log out, and the token is dead afterwards",
+      k_out[:json]&.dig("data", "logout", "success") == true && code(gql(ME, token: k_tok)) == "UNAUTHENTICATED", k_out[:body][0, 120])
+k_forbidden = [ gql(ME), gql(LOGOUT) ].map { |x| code(x) }
+check("K7", "no token gives UNAUTHENTICATED, never FORBIDDEN or data", k_forbidden == %w[UNAUTHENTICATED UNAUTHENTICATED], k_forbidden.inspect, bad: "HIGH")
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
