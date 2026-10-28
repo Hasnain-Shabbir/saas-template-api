@@ -59,7 +59,16 @@ class GraphqlController < ApplicationController
     header.delete_prefix("Bearer ").presence if header.start_with?("Bearer ")
   end
 
+  # For a locked account Devise does `throw :warden`, and Warden's middleware answers with its own 401 (a different shape, and it
+  # names the lock). Catch the throw here: the token of a locked account then gets the same UNAUTHENTICATED as a garbage token.
+  # `catch` returns the thrown hash, so a throw must never be taken for a user.
   def current_user
-    request.env["warden"]&.authenticate(scope: :user)
+    user = nil
+    authenticated = false
+    catch(:warden) do
+      user = request.env["warden"]&.authenticate(scope: :user)
+      authenticated = true
+    end
+    authenticated ? user : nil
   end
 end

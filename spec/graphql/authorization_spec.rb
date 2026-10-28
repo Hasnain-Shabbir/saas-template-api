@@ -3,6 +3,10 @@ require "rails_helper"
 RSpec.describe "Authorization", type: :request do
   let(:me) { "{ me { id email } }" }
   let(:logout) { "mutation { logout(input: {}) { success errors { message path code } } }" }
+  let(:request_email_change) do
+    "mutation { requestEmailChange(input: { newEmail: \"fresh@example.test\", password: \"correct horse battery\" }) { success errors { code } } }"
+  end
+  let(:confirm_email_change) { "mutation { confirmEmailChange(input: { code: \"123456\" }) { success errors { code } } }" }
 
   def error_code(body)
     body.dig("errors", 0, "extensions", "code")
@@ -53,6 +57,18 @@ RSpec.describe "Authorization", type: :request do
           expect(gql(me, token: token_for(user)).dig("data", "me", "id")).to eq(user.id)
         end
 
+        it "may start an email change for themselves" do
+          body = gql(request_email_change, token: token_for(user))
+
+          expect(body.dig("data", "requestEmailChange", "success")).to be(true)
+        end
+
+        it "may confirm an email change for themselves (a wrong code is a normal failure, not FORBIDDEN)" do
+          body = gql(confirm_email_change, token: token_for(user))
+
+          expect(body.dig("data", "confirmEmailChange", "errors", 0, "code")).to eq("INVALID_CODE")
+        end
+
         it "may log out" do
           body = gql(logout, token: token_for(user))
 
@@ -69,6 +85,11 @@ RSpec.describe "Authorization", type: :request do
 
     it "denies logout with UNAUTHENTICATED" do
       expect(error_code(gql(logout))).to eq("UNAUTHENTICATED")
+    end
+
+    it "denies requestEmailChange and confirmEmailChange with UNAUTHENTICATED" do
+      expect(error_code(gql(request_email_change))).to eq("UNAUTHENTICATED")
+      expect(error_code(gql(confirm_email_change))).to eq("UNAUTHENTICATED")
     end
   end
 
@@ -129,7 +150,7 @@ RSpec.describe "Authorization", type: :request do
 
   # Default deny: every operation is public (and throttled) or has a permission test above.
   describe "coverage" do
-    let(:covered) { %w[me logout] }
+    let(:covered) { %w[me logout requestEmailChange confirmEmailChange] }
 
     it "lists exactly the logged-in operations that have a permission test" do
       mutations = Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }

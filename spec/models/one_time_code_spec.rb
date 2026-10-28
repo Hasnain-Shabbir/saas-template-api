@@ -24,6 +24,12 @@ RSpec.describe OneTimeCode do
     expect { described_class.insert_all!([ attributes ]) }.to raise_error(ActiveRecord::RecordNotUnique)
   end
 
+  it "accepts the email_change purpose, one code per purpose for the same user" do
+    described_class.insert_all!([ attributes, attributes.merge(purpose: "email_change") ])
+
+    expect(described_class.where(user_id: user.id).pluck(:purpose)).to match_array(%w[password_reset email_change])
+  end
+
   it "enforces the purpose list and a non-negative attempt count in the database" do
     expect { described_class.insert_all!([ attributes.merge(purpose: "other") ]) }.to raise_error(ActiveRecord::StatementInvalid)
     expect { described_class.insert_all!([ attributes.merge(attempts: -1) ]) }.to raise_error(ActiveRecord::StatementInvalid)

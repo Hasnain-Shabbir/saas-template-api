@@ -6,7 +6,7 @@ class OneTimeCode < ApplicationRecord
 
   belongs_to :user
 
-  enum :purpose, { password_reset: "password_reset" }, validate: true
+  enum :purpose, { password_reset: "password_reset", email_change: "email_change" }, validate: true
 
   validates :code_digest, :expires_at, presence: true
 

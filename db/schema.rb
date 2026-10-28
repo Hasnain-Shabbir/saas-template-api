@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_28_110001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_28_120004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -36,7 +36,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_28_110001) do
     t.datetime "updated_at", null: false
     t.index ["user_id", "purpose"], name: "index_one_time_codes_on_user_id_and_purpose", unique: true
     t.check_constraint "attempts >= 0", name: "one_time_codes_attempts_check"
-    t.check_constraint "purpose::text = 'password_reset'::text", name: "one_time_codes_purpose_check"
+    t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying, 'email_change'::character varying]::text[])", name: "one_time_codes_purpose_check"
   end
 
   create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -47,8 +47,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_28_110001) do
     t.integer "failed_attempts", default: 0, null: false
     t.datetime "locked_at"
     t.string "role", default: "member", null: false
+    t.citext "pending_email"
+    t.citext "previous_email"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.check_constraint "char_length(email::text) <= 254", name: "users_email_length"
+    t.check_constraint "char_length(pending_email::text) <= 254", name: "users_pending_email_length"
+    t.check_constraint "char_length(previous_email::text) <= 254", name: "users_previous_email_length"
     t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying, 'member'::character varying]::text[])", name: "users_role_values"
   end
 

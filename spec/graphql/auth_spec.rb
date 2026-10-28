@@ -156,6 +156,27 @@ RSpec.describe "Auth operations", type: :request do
       expect(unauthenticated?(gql(me, token:))).to be(true)
     end
 
+    it "answers UNAUTHENTICATED, exactly like a garbage token, for the token of a locked account" do
+      token = token_for(user)
+      5.times { login_with(password: "wrong password 1") }
+      expect(user.reload.access_locked?).to be(true)
+
+      locked = gql(me, token:)
+
+      expect(response).to have_http_status(:ok)
+      expect(unauthenticated?(locked)).to be(true)
+      expect(locked).to eq(gql(me, token: "not.a.token"))
+      expect(response.body).not_to match(/lock/i)
+    end
+
+    it "accepts the token again after the account unlocks" do
+      token = token_for(user)
+      5.times { login_with(password: "wrong password 1") }
+      user.reload.unlock_access!
+
+      expect(gql(me, token:).dig("data", "me", "id")).to eq(user.id)
+    end
+
     it "answers UNAUTHENTICATED for a token whose allowlist row is gone" do
       token = token_for(user)
       user.allowlisted_jwts.delete_all

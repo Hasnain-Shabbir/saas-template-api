@@ -10,13 +10,18 @@ class User < ApplicationRecord
   # `users_role_values` CHECK constraint. Permissions of a role live in the policies, not here.
   enum :role, { super_admin: "super_admin", member: "member" }, default: :member, validate: true
 
-  normalizes :email, with: ->(email) { email.strip.downcase }
+  normalizes :email, :pending_email, :previous_email, with: ->(email) { email.strip.downcase }
 
-  validates :email, length: { maximum: ValidationRules::EMAIL_MAX_LENGTH }
+  validates :email, :pending_email, :previous_email, length: { maximum: ValidationRules::EMAIL_MAX_LENGTH }
   validate :password_fits_bcrypt, if: -> { password.present? }
 
   # A new password makes every token issued before it useless.
   after_update :revoke_tokens, if: :saved_change_to_encrypted_password?
+
+  # Devise calls this from a Warden hook on every authenticated request (a JWT request too). That would zero the count of
+  # wrong passwords typed into a logged-in operation (requestEmailChange), so a stolen token could guess without a lock.
+  # The count is reset on purpose instead: `unlock_access!` in Login, RequestEmailChange, and ResetPassword.
+  def reset_failed_attempts! = nil
 
   private
 

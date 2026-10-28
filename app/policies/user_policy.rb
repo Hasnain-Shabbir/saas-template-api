@@ -5,6 +5,8 @@ class UserPolicy < ApplicationPolicy
 
   def logout? = self?
 
+  def change_email? = self?
+
   private
 
   def self?

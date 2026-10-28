@@ -136,6 +136,24 @@ RSpec.describe User do
     end
   end
 
+  describe "failed attempt count" do
+    let(:user) { create(:user) }
+
+    before { 2.times { user.valid_for_authentication? { false } } }
+
+    it "is not reset by Devise's Warden hook (every authenticated request would zero it)" do
+      user.reset_failed_attempts!
+
+      expect(user.reload.failed_attempts).to eq(2)
+    end
+
+    it "is still reset on purpose by unlock_access!" do
+      user.unlock_access!
+
+      expect(user.reload.failed_attempts).to eq(0)
+    end
+  end
+
   describe "tokens" do
     let(:user) { create(:user) }
 

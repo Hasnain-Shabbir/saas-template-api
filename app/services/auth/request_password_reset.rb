@@ -14,8 +14,8 @@ module Auth
       Result.success
     end
 
-    # Returns the errors for the email, or nil when it is fine.
-    def self.invalid_email(email)
+    # Returns the errors for the email, or nil when it is fine. Also used by RequestEmailChange (`attribute` is the argument name).
+    def self.invalid_email(email, attribute: :email)
       value = email.to_s.strip
       problem =
         if value.empty? then Errors::FIELD_REQUIRED
@@ -23,8 +23,7 @@ module Auth
         end
       return unless problem
 
-      ActiveModel::Errors.new(User.new).tap { |errors| errors.add(:email, problem.message) }
+      ActiveModel::Errors.new(User.new).tap { |errors| errors.add(attribute, problem.message) }
     end
-    private_class_method :invalid_email
   end
 end

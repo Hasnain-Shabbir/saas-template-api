@@ -7,5 +7,7 @@ module Types
     field :logout, mutation: Mutations::Auth::Logout
     field :request_password_reset, mutation: Mutations::Auth::RequestPasswordReset
     field :reset_password, mutation: Mutations::Auth::ResetPassword
+    field :request_email_change, mutation: Mutations::Auth::RequestEmailChange
+    field :confirm_email_change, mutation: Mutations::Auth::ConfirmEmailChange
   end
 end

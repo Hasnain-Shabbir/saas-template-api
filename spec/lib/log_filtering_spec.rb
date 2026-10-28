@@ -21,6 +21,19 @@ RSpec.describe "Log filtering" do
     expect(filter.filter(params).to_s).not_to include("s3cret-pass", "a@example.test")
   end
 
+  it "filters a one-time code sent as a variable object" do
+    params = { "variables" => { "input" => { "email" => "a@example.test", "code" => "482913", "password" => "s3cret-pass" } } }
+
+    expect(filter.filter(params).to_s).not_to include("482913", "s3cret-pass")
+  end
+
+  it "filters a one-time code under the wrapped graphql key, and a plain code parameter" do
+    wrapped = { "graphql" => { "variables" => { "input" => { "code" => "482913" } } } }
+
+    expect(filter.filter(wrapped).to_s).not_to include("482913")
+    expect(filter.filter({ "code" => "482913" }).to_s).not_to include("482913")
+  end
+
   it "filters the same values under the wrapped graphql key" do
     params = { "graphql" => { "query" => 'mutation { login(input: { password: "s3cret-pass" }) { token } }' } }
 
