@@ -1209,5 +1209,25 @@ else
   rec("Z", "schema phase skipped (introspection is off in this mode, as it should be)", "INFO")
 end
 
+# ---------- AUD. Audit log: rows hold no secrets, and cannot be changed ----------
+# Runs last, so the log holds the rows of every section above (signups, resets, invitations, profiles, addresses).
+# Test mode only: the database helper does not exist in production mode.
+audit_json = otp("audit_dump", "-")
+if audit_json.empty?
+  rec("AUD1", "audit log check needs the database helper (test mode only)", "INFO")
+else
+  audit_rows = (JSON.parse(audit_json) rescue [])
+  audit_text = audit_json
+  leaks = [ PW, NEW_PW, "$2a$", "$2b$", "eyJ", "Bearer ", "@example.test", PROFILE[:lastName], PROFILE[:dateOfBirth], "4155552671",
+            ADDRESS[:addressLine1], ADDRESS[:city], ADDRESS[:postalCode] ].select { |secret| audit_text.include?(secret) }
+  check("AUD1", "the audit log holds rows (#{audit_rows.size}) from the run", audit_rows.size > 10, "rows: #{audit_rows.size}", bad: "MEDIUM")
+  check("AUD2", "no row contains a password, a bcrypt digest, a JWT, an email address, or profile and address values", leaks.empty?, "found: #{leaks.inspect}", bad: "CRITICAL")
+  check("AUD3", "no row has an empty actor, and system actors are labelled", audit_rows.all? { |x| x["whodunnit"].to_s.match?(/\A(\h{8}-\h{4}-\h{4}-\h{4}-\h{12}|anonymous|system:\S+)\z/) },
+        audit_rows.map { |x| x["whodunnit"] }.uniq.first(5).inspect, bad: "HIGH")
+  check("AUD4", "sensitive fields appear by name only: no row has values for them", audit_rows.none? { |x| (x["value_changes"].keys & %w[encrypted_password email first_name last_name phone date_of_birth token_digest address_line_1]).any? },
+        bad: "CRITICAL")
+  check("AUD5", "the app cannot update or delete an audit row", otp("audit_write", "-") == "blocked", bad: "HIGH")
+end
+
 File.write(OUT, JSON.pretty_generate($results))
 puts "\nSUMMARY #{LABEL}: #{$results.map { |x| x[:verdict] }.tally.inspect}"

@@ -15,6 +15,8 @@
 #   inv_expire    make the open invitation of EMAIL expired
 #   terms_version print the version of the terms the server accepts now (EMAIL is ignored)
 #   profile_raw   print JSON: the stored (raw) first name, last name, date of birth and phone of EMAIL, as the database holds them
+#   audit_dump    print every audit log row as JSON text (EMAIL is ignored); the attack run searches it for secrets
+#   audit_write   try to change and to delete an audit row, print "blocked" when the app refuses both
 #   inv_state     print JSON: invitations of EMAIL (role, accepted, revoked, digest present), and whether a user exists
 abort "test database only" unless Rails.env.test?
 
@@ -22,6 +24,23 @@ action, email = ARGV
 
 if action == "terms_version"
   print Terms::Current::VERSION
+  exit
+end
+
+if action == "audit_dump"
+  print JSON.generate(AuditVersion.all.map(&:attributes))
+  exit
+end
+
+if action == "audit_write"
+  row = AuditVersion.first
+  refused = [ -> { row.update!(whodunnit: "forged") }, -> { row.destroy! } ].all? do |change|
+    change.call
+    false
+  rescue ActiveRecord::ReadOnlyRecord
+    true
+  end
+  print(refused && row.reload.whodunnit != "forged" ? "blocked" : "changed")
   exit
 end
 
