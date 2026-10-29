@@ -78,7 +78,7 @@ wrong = login(email, "wrong-password-x")
 check("A8", "wrong password -> INVALID_CREDENTIALS", wrong[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", wrong[:body])
 check("A9", "unknown email answers identically (no enumeration)", login(uniq, "wrong-password-x")[:json]&.dig("data", "login", "errors") == wrong[:json]&.dig("data", "login", "errors"))
 
-["short", "a@b", "plainstring", "@nodomain.com", ""].each_with_index do |bad, i|
+[ "short", "a@b", "plainstring", "@nodomain.com", "" ].each_with_index do |bad, i|
   r = i.zero? ? signup(uniq, bad) : signup(bad)
   check("A10.#{i}", "signUp rejects invalid input #{bad.inspect}", errs_of(r)&.any? && !tok_of(r), r[:body])
 end
@@ -105,9 +105,9 @@ check("B2", "token signed with attacker secret", denied.(JWT.encode(payload, "at
 check("B3", "expired forged token", denied.(JWT.encode(payload.merge("exp" => now - 10), "attacker-secret", "HS256")), bad: "CRITICAL")
 parts = tok.split(".")
 claims = JSON.parse(Base64.urlsafe_decode64(parts[1] + "=" * ((4 - parts[1].size % 4) % 4)))
-check("B4", "valid token, payload tampered (sub swapped)", denied.([parts[0], b64(claims.merge("sub" => SecureRandom.uuid)), parts[2]].join(".")), bad: "CRITICAL")
+check("B4", "valid token, payload tampered (sub swapped)", denied.([ parts[0], b64(claims.merge("sub" => SecureRandom.uuid)), parts[2] ].join(".")), bad: "CRITICAL")
 check("B5", "valid token, signature byte flipped", denied.(tok[0..-2] + (tok[-1] == "A" ? "B" : "A")), bad: "CRITICAL")
-["garbage", "a.b.c", "....", "null", "'; DROP TABLE users;--", "A" * 100_000].each_with_index do |g, i|
+[ "garbage", "a.b.c", "....", "null", "'; DROP TABLE users;--", "A" * 100_000 ].each_with_index do |g, i|
   check("B6.#{i}", "garbage token #{g[0, 12].inspect} (#{g.size} bytes)", denied.(g))
 end
 check("B7", "token without Bearer prefix ignored", !http(body: { query: ME }, headers: { "Authorization" => tok })[:json]&.dig("data", "me"))
@@ -115,8 +115,8 @@ check("B8", "Basic auth does not authenticate", !http(body: { query: ME }, heade
 check("B9", "token in query string not accepted", !http(path: "/graphql?access_token=#{tok}", body: { query: ME })[:json]&.dig("data", "me"))
 
 # ---------- C. Input fuzzing ----------
-bad_emails = ["' OR '1'='1", "admin@example.test' --", "a@b.c'; DROP TABLE users;--", "%' OR email LIKE '%", "x@y.test\r\nBcc: evil@x.test",
-              "<script>alert(1)</script>@x.test", "${7*7}@x.test", "{{7*7}}@x.test", "‮@x.test", "a@b", "name​@example.test", "nаme@example.test"]
+bad_emails = [ "' OR '1'='1", "admin@example.test' --", "a@b.c'; DROP TABLE users;--", "%' OR email LIKE '%", "x@y.test\r\nBcc: evil@x.test",
+              "<script>alert(1)</script>@x.test", "${7*7}@x.test", "{{7*7}}@x.test", "‮@x.test", "a@b", "name​@example.test", "nаme@example.test" ]
 bad_emails.each_with_index do |s, i|
   r = login(s, "whatever-password")
   check("C1.#{i}", "login email payload #{s[0, 25].inspect}", clean?(r) && !tok_of(r, "login"), r[:body])
@@ -139,7 +139,7 @@ check("C10", "reflected input is JSON-only", r[:headers]["content-type"].to_s.in
 # C11: blind (time-based) SQL injection. A normal injection check looks for a login or an error; a blind one only shows as a slow answer.
 # Each payload asks PostgreSQL to sleep 4 seconds. If any answer is 3 seconds slower than the same call with a harmless value, the input reaches SQL.
 SLEEP = 4_000
-sleepers = ["'; SELECT pg_sleep(4)--", "' OR pg_sleep(4)--", "'||pg_sleep(4)||'", "1; SELECT pg_sleep(4)", "x') OR pg_sleep(4)--", "\" OR pg_sleep(4)--"]
+sleepers = [ "'; SELECT pg_sleep(4)--", "' OR pg_sleep(4)--", "'||pg_sleep(4)||'", "1; SELECT pg_sleep(4)", "x') OR pg_sleep(4)--", "\" OR pg_sleep(4)--" ]
 blind = {
   "login email"           => ->(s) { login(s, "whatever-password") },
   "login password"        => ->(s) { login(email, s) },
@@ -151,8 +151,8 @@ blind = {
 }
 def req_reset_blind(s) = gql("mutation R($i: RequestPasswordResetInput!){ requestPasswordReset(input:$i){ success } }", variables: { i: { email: s } })
 blind.each_with_index do |(name, call), i|
-  base = [call.("harmless-value").fetch(:ms), call.("harmless-value").fetch(:ms)].max
-  slow = sleepers.map { |s| [s, call.(s)[:ms]] }.select { |_, ms| ms >= base + SLEEP - 1_000 }
+  base = [ call.("harmless-value").fetch(:ms), call.("harmless-value").fetch(:ms) ].max
+  slow = sleepers.map { |s| [ s, call.(s)[:ms] ] }.select { |_, ms| ms >= base + SLEEP - 1_000 }
   check("C11.#{i}", "blind SQLi (pg_sleep) in #{name}", slow.empty?, "baseline=#{base}ms slow=#{slow.inspect}", bad: "CRITICAL")
 end
 
@@ -160,7 +160,7 @@ end
 # A victim exists; an attacker registers an email that looks like a pattern of the victim's. Nothing may match the victim.
 victim = "qv#{SecureRandom.hex(4)}@example.test"
 victim_tok = tok_of(signup(victim))
-patterns = ["%@example.test", "qv%@example.test", "qv_#{victim[3..]}", "#{victim.sub('@', '%@')}", "#{victim.sub('@', '+x%@')}"]
+patterns = [ "%@example.test", "qv%@example.test", "qv_#{victim[3..]}", "#{victim.sub('@', '%@')}", "#{victim.sub('@', '+x%@')}" ]
 patterns.each_with_index do |pat, i|
   r1 = signup(pat)
   stored = tok_of(r1) # the pattern may be a valid new account; that is fine, it must be its OWN account
@@ -186,8 +186,8 @@ check("D6", "200 aliased logins in ONE request are refused", r[:status] == 400 |
 check("D7", "5k repeated directives", clean?(gql("query { __typename " + "@skip(if:false) " * 5000 + "}")))
 nested = "{ " + "a: __typename " * 10 + "}"
 check("D8", "complexity-heavy query refused", gql("{ " + (1..400).map { |i| "a#{i}: me { id email }" }.join(" ") + " }")[:json]&.dig("errors").to_s.match?(/complexity|too large|Invalid request|Authentication/i))
-{ "D9 variables not JSON" => { query: ME, variables: "{not json" }, "D10 variables array" => { query: ME, variables: [1, 2] },
-  "D11 variables integer" => { query: ME, variables: 12_345 }, "D12 query array" => { query: [ME] }, "D13 query object" => { query: { a: 1 } },
+{ "D9 variables not JSON" => { query: ME, variables: "{not json" }, "D10 variables array" => { query: ME, variables: [ 1, 2 ] },
+  "D11 variables integer" => { query: ME, variables: 12_345 }, "D12 query array" => { query: [ ME ] }, "D13 query object" => { query: { a: 1 } },
   "D14 operationName object" => { query: ME, operationName: { a: 1 } }, "D15 query missing" => {} }.each do |name, body|
   r = http(body: body)
   check(name.split.first, name.split(" ", 2).last, r[:status] == 400 && code(r) == "BAD_REQUEST", "status=#{r[:status]} #{r[:body][0, 120]}")
@@ -201,7 +201,7 @@ check("D20", "form-encoded body refused", http(raw: "query=#{ME}", ctype: "appli
 check("D21", "text/plain body refused", http(raw: "query=#{ME}", ctype: "text/plain")[:status] == 400)
 check("D22", "GET /graphql not served", http(method: :get, path: "/graphql?query=#{URI.encode_www_form_component(ME)}")[:status] == 404)
 check("D23", "missing required arg", code(gql("mutation { login(input:{email:\"a@b.c\"}){ token } }")) == "BAD_REQUEST")
-r = gql("mutation L($i: LoginInput!){ login(input:$i){ token } }", variables: { i: { email: 123, password: ["x"] } })
+r = gql("mutation L($i: LoginInput!){ login(input:$i){ token } }", variables: { i: { email: 123, password: [ "x" ] } })
 check("D24", "wrong variable types -> VALIDATION_FAILED", code(r) == "VALIDATION_FAILED", r[:body])
 check("D25", "null literals for required args", clean?(gql("mutation { login(input:{email:null,password:null}){ token } }")))
 
@@ -209,7 +209,7 @@ check("D25", "null literals for required args", clean?(gql("mutation { login(inp
 def avg(n) = (1..n).map { yield }.sum / n.to_f
 t_known = avg(6) { login(email, "wrong-password-x")[:ms] }
 t_unknown = avg(6) { login(uniq, "wrong-password-x")[:ms] }
-check("E1", "login timing, known vs unknown email (prod only: bcrypt cost 1 in test)", LABEL != "prod" || (t_known - t_unknown).abs < [t_known, t_unknown].max * 0.4, "known=#{t_known.round}ms unknown=#{t_unknown.round}ms", bad: "WEAK")
+check("E1", "login timing, known vs unknown email (prod only: bcrypt cost 1 in test)", LABEL != "prod" || (t_known - t_unknown).abs < [ t_known, t_unknown ].max * 0.4, "known=#{t_known.round}ms unknown=#{t_unknown.round}ms", bad: "WEAK")
 rec("E2", "signUp tells whether an email is taken (accepted product decision)", "INFO", errs_of(signup(email)).inspect)
 
 # ---------- F. HTTP, CORS, routes ----------
@@ -252,7 +252,7 @@ check("H1", "account locks after repeated wrong passwords (right password refuse
 locked_body = r[:json]&.dig("data", "login", "errors")
 check("H2", "locked answer identical to a wrong-password answer", locked_body == wrong[:json]&.dig("data", "login", "errors"))
 t_locked = avg(4) { login(victim)[:ms] }
-check("H3", "locked account takes as long as an unknown one (prod only)", LABEL != "prod" || (t_locked - t_unknown).abs < [t_locked, t_unknown].max * 0.4, "locked=#{t_locked.round}ms unknown=#{t_unknown.round}ms", bad: "WEAK")
+check("H3", "locked account takes as long as an unknown one (prod only)", LABEL != "prod" || (t_locked - t_unknown).abs < [ t_locked, t_unknown ].max * 0.4, "locked=#{t_locked.round}ms unknown=#{t_unknown.round}ms", bad: "WEAK")
 
 # Throttle counters need a real cache: the test environment uses a null store, so this runs in prod mode only.
 if LABEL == "prod"
@@ -401,19 +401,19 @@ ops = ->(n, q) { Array.new(n) { { query: q } } }
 end
 r = http(body: { _json: ops.(5, ME) }, headers: { "Authorization" => "Bearer #{jt}" })
 check("J1.3", "_json parameter does not smuggle a batch", clean?(r) && !r[:json].is_a?(Array) && !r[:json]&.dig("data"), r[:body][0, 120], bad: "HIGH")
-r = http(raw: "[" + ([JSON.generate({ query: ME })] * 20).join(",") + "]", headers: { "Authorization" => "Bearer #{jt}" })
+r = http(raw: "[" + ([ JSON.generate({ query: ME }) ] * 20).join(",") + "]", headers: { "Authorization" => "Bearer #{jt}" })
 check("J1.4", "raw multiplex body refused", r[:status] == 400 && !r[:json].is_a?(Array), "status=#{r[:status]}", bad: "CRITICAL")
 
 # J2: NoSQL-style objects and shell metacharacters where a string is expected.
-[{ "$ne" => nil }, { "$gt" => "" }, { "$regex" => ".*" }].each_with_index do |o, i|
+[ { "$ne" => nil }, { "$gt" => "" }, { "$regex" => ".*" } ].each_with_index do |o, i|
   r = gql(LOGIN, variables: { i: { email: o, password: o } })
   check("J2.#{i}", "operator object #{o.keys.first} instead of a string in login", clean?(r) && !tok_of(r, "login"), r[:body][0, 120], bad: "CRITICAL")
 end
-shells = [";sleep 4", "$(sleep 4)", "`sleep 4`", "|sleep 4", "&& sleep 4", "\nsleep 4"]
-[["login email", ->(s) { login(s, "whatever-password") }], ["signUp email", ->(s) { signup(s) }],
- ["reset email", ->(s) { req_reset_blind(s) }]].each_with_index do |(name, call), i|
+shells = [ ";sleep 4", "$(sleep 4)", "`sleep 4`", "|sleep 4", "&& sleep 4", "\nsleep 4" ]
+[ [ "login email", ->(s) { login(s, "whatever-password") } ], [ "signUp email", ->(s) { signup(s) } ],
+ [ "reset email", ->(s) { req_reset_blind(s) } ] ].each_with_index do |(name, call), i|
   base = call.("harmless-value")[:ms]
-  slow = shells.map { |s| [s, call.(s)[:ms]] }.select { |_, ms| ms >= base + 3_000 }
+  slow = shells.map { |s| [ s, call.(s)[:ms] ] }.select { |_, ms| ms >= base + 3_000 }
   check("J2.s#{i}", "shell metacharacters in #{name} cause no delay", slow.empty?, "baseline=#{base}ms slow=#{slow.inspect}", bad: "CRITICAL")
 end
 
@@ -422,7 +422,7 @@ wordlist = %w[users allUsers user node nodes admin accounts account tenants tena
               viewer currentUser version health stats metrics logs tokens sessions roles permissions impersonate deleteUser updateUser
               createUser createAdmin resetAllPasswords exportData backup]
 # A guess counts as a hit when its answer differs from the answer for a random name that surely does not exist.
-probe = ->(w) { [gql("{ #{w} { __typename } }"), gql("mutation { #{w}(input:{}) { __typename } }")] }
+probe = ->(w) { [ gql("{ #{w} { __typename } }"), gql("mutation { #{w}(input:{}) { __typename } }") ] }
 fake = "zz#{SecureRandom.hex(4)}"
 fake_q, fake_m = probe.(fake).map { |x| x[:body].gsub(fake, "NAME") }
 hits = wordlist.select do |w|
@@ -432,7 +432,7 @@ end
 exposed = hits.select do |w|
   r = gql("{ #{w} { __typename } }")
   r2 = gql("mutation { #{w}(input:{}) { __typename } }")
-  [r, r2].any? { |x| x[:json]&.dig("data")&.values&.any? { |v| !v.nil? } }
+  [ r, r2 ].any? { |x| x[:json]&.dig("data")&.values&.any? { |v| !v.nil? } }
 end
 check("J3.0", "guessed names never return data without a token", exposed.empty?, exposed.inspect, bad: "CRITICAL")
 check("J3.1", "Relay node/nodes root fields absent (they bypass per-type authorization)", !hits.include?("node") && !hits.include?("nodes"), hits.inspect, bad: "HIGH")
@@ -442,7 +442,7 @@ rec("J3.2", "guessed names that exist as fields (review: each must be intended a
 leak = /\.rb\b|\/app\/|\/gems\/|\/lib\/|ActiveRecord|ActionController|PG::|Errno|NoMethodError|NameError|SELECT\s|INSERT\s|#<|backtrace|stack ?trace|Traceback/i
 probes = {
   "syntax error" => { query: "{ me { " }, "unknown field" => { query: "{ meee }" }, "bad enum/arg type" => { query: "mutation { login(input: 5){ token } }" },
-  "null for required" => { query: LOGIN, variables: { i: nil } }, "bad variable type" => { query: LOGIN, variables: { i: { email: 5, password: [1] } } },
+  "null for required" => { query: LOGIN, variables: { i: nil } }, "bad variable type" => { query: LOGIN, variables: { i: { email: 5, password: [ 1 ] } } },
   "unknown directive" => { query: "{ me @nope { id } }" }, "wrong content" => { query: ME, variables: "[1]" },
   "deep nesting" => { query: "{ " + "me { " * 300 + "id" + " }" * 300 + " }" }, "huge int" => { query: "mutation { login(input:{email:\"a@b.test\", password:99999999999999999999999}){ token } }" },
   "unterminated string" => { query: "mutation { login(input:{email:\"abc" }
@@ -457,7 +457,7 @@ check("J4.1", "validation errors name the rule, not the implementation", !r[:bod
 
 # J5: query timeout and cost. The heaviest query the complexity limit lets through must still answer fast.
 # (Black-box can only measure; whether a timeout exists is read from the source below.)
-heavy = [60, 40, 20, 10].lazy.map { |n| [n, gql("{ " + (1..n).map { |i| "a#{i}: me { id email }" }.join(" ") + " }", token: jt)] }
+heavy = [ 60, 40, 20, 10 ].lazy.map { |n| [ n, gql("{ " + (1..n).map { |i| "a#{i}: me { id email }" }.join(" ") + " }", token: jt) ] }
                         .find { |_, r| r[:json]&.dig("data") }
 if heavy
   n, r = heavy
@@ -675,23 +675,156 @@ if LABEL == "test"
   check("L36", "...so that code still opens the first address", ec_ok?(conf_ec(t, c)) && ec_state(first)["email"] == first, bad: "HIGH")
 end
 
+# ---------- M. Invitations ----------
+# Black-box checks run in both modes. The ones that need an invitation token (the "invitee's inbox") run in test mode only.
+INVITE = "mutation I($i: InviteUserInput!){ inviteUser(input:$i){ success errors{message path code} } }"
+ACCEPT = "mutation A($i: AcceptInvitationInput!){ acceptInvitation(input:$i){ token user{id email role} errors{message path code} } }"
+REVOKE = "mutation R($i: RevokeInvitationInput!){ revokeInvitation(input:$i){ success errors{message path code} } }"
+RESEND = "mutation S($i: ResendInvitationInput!){ resendInvitation(input:$i){ success errors{message path code} } }"
+
+def inv(token, email, extra = {}) = gql(INVITE, variables: { i: { email: email, role: "MEMBER" }.merge(extra) }, token: token)
+def inv_accept(tok, pass = PW, extra = {}) = gql(ACCEPT, variables: { i: { invitationToken: tok, password: pass }.merge(extra) })
+def inv_revoke(token, email) = gql(REVOKE, variables: { i: { email: email } }, token: token)
+def inv_resend(token, email) = gql(RESEND, variables: { i: { email: email } }, token: token)
+def accept_ok?(r) = !r[:json]&.dig("data", "acceptInvitation", "token").nil?
+def accept_err(r) = r[:json]&.dig("data", "acceptInvitation", "errors", 0, "code")
+def inv_state(email) = (JSON.parse(otp("inv_state", email)) rescue {})
+
+m_admin_email = uniq
+m_admin_tok = tok_of(signup(m_admin_email))
+otp("make_admin", m_admin_email)
+m_admin_tok = tok_of(login(m_admin_email), "login") # a fresh login, the role is read from the database on each request
+m_member_tok = tok_of(signup(uniq))
+
+none = [ inv(nil, uniq), inv("garbage", uniq), inv_revoke(nil, uniq), inv_revoke("garbage", uniq), inv_resend(nil, uniq), inv_resend("garbage", uniq) ]
+check("M1", "inviteUser, revokeInvitation, resendInvitation: no token or a garbage token is UNAUTHENTICATED",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+m_target = uniq
+forbidden = [ inv(m_member_tok, m_target), inv(m_member_tok, m_target, { email: "not-an-email" }), inv_revoke(m_member_tok, m_target), inv_resend(m_member_tok, m_target) ]
+check("M2", "a member gets FORBIDDEN on all three, also with a bad email (403 comes before validation)",
+      forbidden.all? { |x| code(x) == "FORBIDDEN" }, forbidden.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+m_admin_up = inv(m_admin_tok, m_target, { role: "SUPER_ADMIN" })
+check("M2a", "even a super_admin cannot invite a super_admin: the role enum only lists MEMBER, so it is refused", code(m_admin_up) != nil && !m_admin_up[:body].include?("\"success\":true"), m_admin_up[:body][0, 100], bad: "CRITICAL")
+check("M2b", "...and no invitation was created", inv_state(m_target).fetch("invitations", [ 1 ]).empty? || LABEL == "prod", inv_state(m_target).inspect, bad: "CRITICAL")
+
+nasty = [ "x" * 10_000, "' OR 1=1 --", "\u0000", "🔥" * 50, "../../etc/passwd", "<script>alert(1)</script>", "A" * 43, "-" * 43, "{\"$ne\":null}" ]
+rs = nasty.map { |v| inv_accept(v) }
+check("M3", "acceptInvitation with wrong or hostile tokens: INVALID_INVITATION (or a schema error for NUL), never a 500, same message",
+      rs.all? { |x| clean?(x) && (accept_err(x) == "INVALID_INVITATION" || x[:json]&.dig("errors")) } && rs.filter_map { |x| accept_err(x) }.uniq.size <= 1,
+      rs.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "HIGH")
+
+mass = [ inv(m_admin_tok, uniq, { inviterId: SecureRandom.uuid }), inv(m_admin_tok, uniq, { tokenDigest: "x" }), inv(m_admin_tok, uniq, { acceptedAt: "2020-01-01" }),
+         inv_accept("A" * 43, PW, { role: "SUPER_ADMIN" }), inv_accept("A" * 43, PW, { email: uniq }) ]
+check("M4", "extra input fields (inviterId, tokenDigest, acceptedAt, role, email on accept) are rejected by the schema",
+      mass.all? { |x| x[:json]&.dig("errors") && !x[:body].include?("INTERNAL_ERROR") }, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+# Same answer for a new email and an email that already has an account (no enumeration, not even for a super_admin).
+m_new = uniq
+m_taken = uniq
+signup(m_taken)
+a_new = inv(m_admin_tok, m_new)
+a_taken = inv(m_admin_tok, m_taken)
+check("M5", "inviting a new email and an email with an account: exactly the same answer",
+      a_new[:json] == a_taken[:json] && a_new[:json]&.dig("data", "inviteUser", "success") == true, "#{a_new[:body][0, 90]} | #{a_taken[:body][0, 90]}", bad: "HIGH")
+check("M5b", "revoke and resend of a never-invited email answer success too (nothing to learn)",
+      [ inv_revoke(m_admin_tok, uniq), inv_resend(m_admin_tok, uniq) ].all? { |x| x[:json]&.dig("data")&.values&.first&.dig("success") == true }, bad: "MEDIUM")
+check("M5c", "a badly formed email is VALIDATION_FAILED on all three", [ inv(m_admin_tok, "nope"), inv_revoke(m_admin_tok, "nope"), inv_resend(m_admin_tok, "nope") ]
+      .all? { |x| x[:json]&.dig("data")&.values&.first&.dig("errors", 0, "code") == "VALIDATION_FAILED" }, bad: "MEDIUM")
+
+m_batch = gql("mutation { a: inviteUser(input: { email: \"#{uniq}\", role: MEMBER }) { success } b: inviteUser(input: { email: \"#{uniq}\", role: MEMBER }) { success } }", token: m_admin_tok)
+check("M6", "several invitation operations in one request are refused as a whole (aliases multiply emails)", code(m_batch) == "BAD_REQUEST" && m_batch[:status] == 400, m_batch[:body][0, 100], bad: "HIGH")
+
+if LABEL == "test"
+  mint = ->(role = "member") { e = uniq; [ e, otp("inv_mint", e, role) ] }
+
+  e, t = mint.call
+  r = inv_accept(t)
+  check("M7", "a valid token creates the user (member) and logs them in", accept_ok?(r) && role_of(e) == "member", r[:body][0, 140], bad: "HIGH")
+  r2 = inv_accept(t, "Another-Str0ng-Pass1")
+  check("M8", "the same token a second time: INVALID_INVITATION, password unchanged", accept_err(r2) == "INVALID_INVITATION" && !tok_of(login(e), "login").nil? && tok_of(login(e, "Another-Str0ng-Pass1"), "login").nil?, r2[:body][0, 120], bad: "CRITICAL")
+
+  e, t = mint.call("super_admin") # only the database can make one: the API refuses
+  inv_accept(t)
+  check("M9", "the role comes from the invitation row (super_admin here), not from the client", role_of(e) == "super_admin", role_of(e), bad: "HIGH")
+
+  e, t = mint.call
+  otp("inv_expire", e)
+  r = inv_accept(t)
+  check("M10", "an expired invitation: INVALID_INVITATION, no user", accept_err(r) == "INVALID_INVITATION" && !inv_state(e)["user"], r[:body][0, 120], bad: "HIGH")
+
+  e, t = mint.call
+  inv_revoke(m_admin_tok, e)
+  r = inv_accept(t)
+  check("M11", "a revoked invitation: INVALID_INVITATION, no user", accept_err(r) == "INVALID_INVITATION" && !inv_state(e)["user"], r[:body][0, 120], bad: "HIGH")
+
+  e, t = mint.call
+  r = inv_accept(t, "short")
+  check("M12", "a weak password: VALIDATION_FAILED, and the invitation is not used up", r[:json]&.dig("data", "acceptInvitation", "errors", 0, "code") == "VALIDATION_FAILED" && accept_ok?(inv_accept(t)), r[:body][0, 120], bad: "MEDIUM")
+
+  e, t = mint.call
+  signup(e) # the address got an account in the meantime
+  r = inv_accept(t)
+  check("M13", "email already has an account: INVALID_INVITATION, no hint that the account exists, existing password untouched",
+        accept_err(r) == "INVALID_INVITATION" && !r[:body].match?(/taken|exists/i) && !tok_of(login(e, "Another-Str0ng-Pass1"), "login"), r[:body][0, 120], bad: "HIGH")
+
+  e, t = mint.call
+  rs = 8.times.map { Thread.new { inv_accept(t) } }.map(&:value)
+  check("M14", "8 parallel accepts with the same token: exactly one wins, no 500, one user", rs.count { |x| accept_ok?(x) } == 1 && rs.all? { |x| clean?(x) }, rs.map { |x| x[:body][0, 60] }.tally.inspect, bad: "HIGH")
+
+  e, t = mint.call
+  inv_accept(t)
+  m_new_tok = tok_of(login(e), "login")
+  r = inv(m_new_tok, uniq)
+  check("M15", "a user made by an invitation as member cannot invite (no privilege from the invitation flow)", code(r) == "FORBIDDEN", r[:body][0, 100], bad: "CRITICAL")
+
+  # The token in the database is a keyed digest: sending the stored digest as a token must not work.
+  e, t = mint.call
+  r = inv_accept(Base64.urlsafe_encode64(SecureRandom.random_bytes(32), padding: false))
+  check("M16", "a random well-formed token: INVALID_INVITATION", accept_err(r) == "INVALID_INVITATION", r[:body][0, 100], bad: "HIGH")
+
+  # Test mode does not run the email job, so the new link is not visible here: the old link and the row state are.
+  e, t = mint.call
+  inv_revoke(m_admin_tok, e)
+  rs = inv_resend(m_admin_tok, e)
+  st = inv_state(e)["invitations"]&.first || {}
+  check("M18", "resend of a revoked invitation answers success, reopens it, and the old link stays dead",
+        rs[:json]&.dig("data", "resendInvitation", "success") == true && st["revoked"] == false && st["accepted"] == false && accept_err(inv_accept(t)) == "INVALID_INVITATION" && !inv_state(e)["user"],
+        "#{rs[:body][0, 80]} #{st.inspect}", bad: "HIGH")
+
+  e, t = mint.call
+  inv_accept(t)
+  inv_resend(m_admin_tok, e)
+  check("M19", "resend never reopens a used invitation (still accepted, not revoked-cleared into a second user)", (inv_state(e)["invitations"] || []).size == 1 && inv_state(e)["invitations"][0]["accepted"] == true, inv_state(e).inspect, bad: "HIGH")
+else
+  rec("M7-19", "invitation token checks need the token (test mode only)", "INFO")
+end
+
+# Throttle counters need a real cache: prod mode only.
+if LABEL == "prod"
+  $pinned_ip = "10.98.98.#{rand(1..254)}"
+  codes = 32.times.map { inv(m_admin_tok, uniq)[:status] }
+  check("M17", "31st invitation operation from one IP in an hour -> 429", codes[30..].all? { |c| c == 429 } && codes[0..29].none? { |c| c == 429 }, codes.tally.inspect, bad: "HIGH")
+  $pinned_ip = nil
+end
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
   intro = gql("{ __schema { queryType { name } mutationType { name } types { kind name " \
               "fields { name type { ...T } args { name type { ...T } } } inputFields { name type { ...T } } enumValues { name } } } } #{frag}")
-  types = (intro[:json]&.dig("data", "__schema", "types") || []).to_h { |t| [t["name"], t] }
-  roots = %w[queryType mutationType].filter_map { |k| n = intro[:json]&.dig("data", "__schema", k, "name"); [k, types[n]] if n }
-  fuzz = ["", "x" * 10_000, "' OR 1=1 --", "\u0000", "🔥" * 50, "../../etc/passwd", "<script>alert(1)</script>", "-1", "99999999999999999999"]
+  types = (intro[:json]&.dig("data", "__schema", "types") || []).to_h { |t| [ t["name"], t ] }
+  roots = %w[queryType mutationType].filter_map { |k| n = intro[:json]&.dig("data", "__schema", k, "name"); [ k, types[n] ] if n }
+  fuzz = [ "", "x" * 10_000, "' OR 1=1 --", "\u0000", "🔥" * 50, "../../etc/passwd", "<script>alert(1)</script>", "-1", "99999999999999999999" ]
 
   type_str = ->(t) { t["kind"] == "NON_NULL" ? "#{type_str.(t['ofType'])}!" : t["kind"] == "LIST" ? "[#{type_str.(t['ofType'])}]" : t["name"] }
   base = ->(t) { t["ofType"] ? base.(t["ofType"]) : t }
   build = lambda do |t, str|
     case t["kind"]
     when "NON_NULL" then build.(t["ofType"], str)
-    when "LIST" then [build.(t["ofType"], str)]
+    when "LIST" then [ build.(t["ofType"], str) ]
     when "ENUM" then types[t["name"]]["enumValues"].first["name"]
-    when "INPUT_OBJECT" then types[t["name"]]["inputFields"].to_h { |f| [f["name"], build.(f["type"], str)] }
+    when "INPUT_OBJECT" then types[t["name"]]["inputFields"].to_h { |f| [ f["name"], build.(f["type"], str) ] }
     else
       case t["name"] when "Int" then 1 when "Float" then 1.5 when "Boolean" then true when "ID" then SecureRandom.uuid else str end
     end
@@ -700,8 +833,8 @@ if LABEL == "test"
     vars = field["args"].map { |a| "$#{a['name']}: #{type_str.(a['type'])}" }.join(", ")
     args = field["args"].map { |a| "#{a['name']}: $#{a['name']}" }.join(", ")
     sel = %w[OBJECT INTERFACE UNION].include?(base.(field["type"])["kind"]) ? " { __typename }" : ""
-    ["#{kind} Z#{vars.empty? ? '' : "(#{vars})"} { #{field['name']}#{args.empty? ? '' : "(#{args})"}#{sel} }",
-     field["args"].to_h { |a| [a["name"], build.(a["type"], str)] }]
+    [ "#{kind} Z#{vars.empty? ? '' : "(#{vars})"} { #{field['name']}#{args.empty? ? '' : "(#{args})"}#{sel} }",
+     field["args"].to_h { |a| [ a["name"], build.(a["type"], str) ] } ]
   end
 
   roots.each do |root_key, root|
@@ -734,7 +867,7 @@ if LABEL == "test"
     return [] if n.zero?
     object_fields.(type_name).each do |f|
       rest = chain.(base.(f["type"])["name"], n - 1)
-      return [f["name"], *rest] if rest
+      return [ f["name"], *rest ] if rest
     end
     nil
   end
@@ -750,7 +883,7 @@ if LABEL == "test"
   end
 
   # ---- Z6. Amount limits: any list or any size-like argument must be capped.
-  count_max = ->(v) { v.is_a?(Array) ? [v.size, *v.map { |x| count_max.(x) }].max : v.is_a?(Hash) ? (v.values.map { |x| count_max.(x) }.max || 0) : 0 }
+  count_max = ->(v) { v.is_a?(Array) ? [ v.size, *v.map { |x| count_max.(x) } ].max : v.is_a?(Hash) ? (v.values.map { |x| count_max.(x) }.max || 0) : 0 }
   size_args = /\A(first|last|limit|per_?page|page_?size|count|take|size|max|top)\z/i
   roots.each do |root_key, root|
     kind = root_key == "queryType" ? "query" : "mutation"
@@ -785,7 +918,7 @@ if LABEL == "test"
       next unless field["args"].any? { |a| has_id.(base.(a["type"])) }
       idor_seen = true
       q, v = op_for.(kind, field, "x")
-      swap = ->(h, id) { h.to_h { |k, x| [k, x.is_a?(Hash) ? swap.(x, id) : (x.is_a?(String) && x.match?(/\A[0-9a-f-]{36}\z/) ? id : x)] } }
+      swap = ->(h, id) { h.to_h { |k, x| [ k, x.is_a?(Hash) ? swap.(x, id) : (x.is_a?(String) && x.match?(/\A[0-9a-f-]{36}\z/) ? id : x) ] } }
       mine = gql(q, variables: swap.(v, owner_id), token: intruder)
       none = gql(q, variables: swap.(v, SecureRandom.uuid), token: intruder)
       check("Z7.#{field['name']}", "#{kind} #{field['name']}: another user's id answers exactly like a missing id",
@@ -809,8 +942,8 @@ if LABEL == "test"
       targets = field["args"].select { |a| a["name"].match?(url_args) || (base.(a["type"])["kind"] == "INPUT_OBJECT" && types[base.(a["type"])["name"]]["inputFields"].any? { |f| f["name"].match?(url_args) }) }
       next if targets.empty?
       ssrf_seen = true
-      ["http://127.0.0.1:#{canary_port}/ssrf", "http://localhost:#{canary_port}/", "http://[::1]:#{canary_port}/", "http://2130706433:#{canary_port}/",
-       "http://169.254.169.254/latest/meta-data/", "file:///etc/passwd", "gopher://127.0.0.1:#{canary_port}/"].each_with_index do |u, i|
+      [ "http://127.0.0.1:#{canary_port}/ssrf", "http://localhost:#{canary_port}/", "http://[::1]:#{canary_port}/", "http://2130706433:#{canary_port}/",
+       "http://169.254.169.254/latest/meta-data/", "file:///etc/passwd", "gopher://127.0.0.1:#{canary_port}/" ].each_with_index do |u, i|
         q, v = op_for.(kind, field, u)
         r = gql(q, variables: v, token: depth_user)
         check("Z8.#{field['name']}.#{i}", "#{kind} #{field['name']}: internal target #{u[0, 30].inspect} not fetched, no 500, no file/metadata in answer",

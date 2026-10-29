@@ -9,9 +9,33 @@
 #   ec_expire  make the user's email_change code expired
 #   ec_state print JSON: email, pending, previous, code present, attempts, locked, failed attempts, token count
 #   ec_mail  EMAIL NEW_EMAIL  like ec_mint, but print the code mail (html, marker line, text) instead of the code
+#   make_admin    make the user a super_admin (the API has no way to do that, on purpose)
+#   inv_mint EMAIL ROLE  create an open invitation for EMAIL and print its plain token (the invitee's inbox). Test mode only:
+#                        production mode has another secret key, so its digests do not match
+#   inv_expire    make the open invitation of EMAIL expired
+#   inv_state     print JSON: invitations of EMAIL (role, accepted, revoked, digest present), and whether a user exists
 abort "test database only" unless Rails.env.test?
 
 action, email = ARGV
+
+if action.start_with?("inv_")
+  case action
+  when "inv_mint"
+    Invitation.where(email: email).delete_all
+    token = Invitation.generate_token
+    Invitation.create!(email: email, role: ARGV[2] || "member", token_digest: Invitation.digest(token), expires_at: Invitation::LIFETIME.from_now, last_sent_at: Time.current)
+    print token
+  when "inv_expire"
+    Invitation.open.where(email: email).update_all(expires_at: 1.minute.ago)
+  when "inv_state"
+    print JSON.generate(invitations: Invitation.where(email: email).map { |i| { role: i.role, accepted: !i.accepted_at.nil?, revoked: !i.revoked_at.nil?, digest: !i.token_digest.nil? } },
+                        user: User.exists?(email: email), role: User.find_by(email: email)&.role)
+  else
+    abort "unknown action"
+  end
+  exit
+end
+
 user = User.find_by!(email: email)
 
 case action
@@ -29,6 +53,8 @@ when "attempts"
   print OneTimeCode.find_by(user_id: user.id, purpose: "password_reset")&.attempts.inspect
 when "role"
   print user.role
+when "make_admin"
+  user.update!(role: "super_admin")
 when "ec_mint", "ec_mail"
   OneTimeCode.where(user_id: user.id, purpose: "email_change").delete_all
   user.update!(pending_email: ARGV[2])

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs the attack suite against two LOCAL servers (test mode and production mode), then cleans up.
 # Usage: .claude/skills/api-attack-test/scripts/run.sh [output_dir]   (default output_dir: tmp/attack-test)
+# Both servers get ALLOW_PUBLIC_SIGN_UP=true (the template default is off): the script uses signUp to make its users.
 # Touches the TEST database only. Never reads secrets: the production-mode key is random and thrown away.
 set -u
 cd "$(git rev-parse --show-toplevel)"
@@ -17,8 +18,8 @@ trap cleanup EXIT
 PUBLIC_OPS=$(RAILS_ENV=test bin/rails runner 'print Rack::Attack::PUBLIC_OPERATIONS.join(",")' 2>/dev/null | tail -1)
 truncate_db
 
-RAILS_ENV=test bin/rails server -p 4001 -b 127.0.0.1 -P "$OUT/t.pid" > "$OUT/server_test.log" 2>&1 &
-SECRET_KEY_BASE=$(openssl rand -hex 64) RAILS_ENV=production APP_HOST=127.0.0.1 FRONTEND_URL=http://localhost:3000 MAILER_FROM=no-reply@example.test \
+ALLOW_PUBLIC_SIGN_UP=true RAILS_ENV=test bin/rails server -p 4001 -b 127.0.0.1 -P "$OUT/t.pid" > "$OUT/server_test.log" 2>&1 &
+ALLOW_PUBLIC_SIGN_UP=true SECRET_KEY_BASE=$(openssl rand -hex 64) RAILS_ENV=production APP_HOST=127.0.0.1 FRONTEND_URL=http://localhost:3000 MAILER_FROM=no-reply@example.test \
   DATABASE_URL="postgresql://$(whoami)@localhost/$DB" bin/rails server -p 4002 -b 127.0.0.1 -P "$OUT/p.pid" > "$OUT/server_prod.log" 2>&1 &
 for i in $(seq 1 30); do
   curl -s -o /dev/null -m1 localhost:4001/up && curl -s -o /dev/null -m1 -H 'Host: 127.0.0.1' localhost:4002/up && break; sleep 1

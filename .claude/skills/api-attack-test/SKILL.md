@@ -16,6 +16,7 @@ Act as a hostile security tester and a QA engineer. The goal is to break the API
 ```
 .claude/skills/api-attack-test/scripts/run.sh          # output in tmp/attack-test/ (ignored by git)
 ```
+Both servers run with `ALLOW_PUBLIC_SIGN_UP=true` (the template default is off), because the script makes its users with `signUp`. The default-off answer (FORBIDDEN) is covered by a spec, not by this run. `otp_helper.rb` also promotes a user to super_admin and mints invitations (test database only).
 It starts two servers (test mode on 4001, production mode on 4002), runs `scripts/attack.rb` against both, checks the production log for leaked credentials, stops the servers, and empties the test database. Takes about 3 to 4 minutes.
 Baseline first: `bundle exec rspec`, `bin/rubocop`, `bin/brakeman -q`.
 
@@ -33,6 +34,7 @@ Baseline first: `bundle exec rspec`, `bin/rubocop`, `bin/brakeman -q`.
 | I | Password reset (email code): enumeration, guess limit, replay, expiry, races, reset email body |
 | J | OWASP GraphQL cheat sheet: array batching (J1), NoSQL objects and shell metacharacters (J2), guessed field names and `node`/`nodes` (J3), leaks in error messages (J4), query cost and timeout (J5) |
 | Z | **Schema-driven**: reads the schema, then for every query and mutation tries no token, a garbage token, and nine nasty string values, and checks for 500s. New operations are covered automatically. It also has probes that stay dormant (INFO) until the schema has something to test: depth limit (Z5), huge `first`/`limit` and unbounded lists (Z6), IDOR with another user's id (Z7), SSRF with a local canary listener (Z8). |
+| M | Invitations: no token and garbage token (M1), member denied and role escalation (M2), hostile tokens (M3), mass assignment (M4), same answer for new and existing email (M5), alias batching (M6); test mode with a minted token: accept, replay, role from the invitation, expired, revoked, weak password, email taken meanwhile, parallel accepts, no privilege after accept (M7 to M16), resend reopens a revoked invitation but never a used one (M18, M19); prod mode: 30 per hour per IP (M17) |
 | LOG | Production log must contain no inline password, email, or JWT |
 
 `INTERNAL_ERROR` anywhere in a response, or any status of 500, is a finding (the error tracker would also get noise).
