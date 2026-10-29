@@ -30,7 +30,7 @@ RSpec.describe "Auth operations", type: :request do
     body["errors"]&.first&.dig("extensions", "code") == "UNAUTHENTICATED"
   end
 
-  describe "signUp" do
+  describe "signUp", :public_sign_up do
     let(:input) { { email: "new@example.test", password: "correct horse battery" } }
 
     it "creates the user, returns a token, and allowlists it" do
@@ -215,7 +215,7 @@ RSpec.describe "Auth operations", type: :request do
       body = gql(logout)
 
       expect(unauthenticated?(body)).to be(true)
-      expect(body["data"]["logout"]).to be_nil
+      expect(body["data"]).to be_nil
     end
   end
 

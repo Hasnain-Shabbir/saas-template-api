@@ -11,11 +11,16 @@ class GraphqlController < ApplicationController
     operation_name = params[:operationName]
     raise InvalidRequest unless query.is_a?(String) && (operation_name.nil? || operation_name.is_a?(String))
 
+    variables = prepare_variables(params[:variables]) # the request envelope: a malformed one is BAD_REQUEST for everybody
+    user = current_user
+    # Authentication comes before everything GraphQL checks (arguments, enums, variables): nobody logged in gets UNAUTHENTICATED only.
+    return render json: { data: nil }.merge(Errors.response_body(Errors::UNAUTHENTICATED)) if user.nil? && AuthGate.login_required?(query, operation_name:)
+
     context = {
-      current_user: current_user,
+      current_user: user,
       token: bearer_token
     }
-    result = SaasTemplateApiSchema.execute(query, variables: prepare_variables(params[:variables]), context: context, operation_name: operation_name)
+    result = SaasTemplateApiSchema.execute(query, variables:, context: context, operation_name: operation_name)
     render json: GraphqlErrorNormalizer.call(result.to_h)
   end
 

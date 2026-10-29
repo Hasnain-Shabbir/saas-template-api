@@ -14,7 +14,7 @@ RSpec.describe "GraphQL error shape", type: :request do
   end
 
   it "answers an unknown field with BAD_REQUEST" do
-    body = gql("query { doesNotExist }")
+    body = gql("query { doesNotExist }", token: token_for(create(:user)))
 
     expect(body["errors"]).to all(match("path" => a_kind_of(Array), "message" => a_kind_of(String), "extensions" => { "code" => "BAD_REQUEST" }))
   end
