@@ -6,8 +6,10 @@ module Errors
 
   UNAUTHENTICATED = Error.new(code: "UNAUTHENTICATED", message: "Authentication required")
   FORBIDDEN = Error.new(code: "FORBIDDEN", message: "You are not allowed to do this")
+  SIGN_UP_DISABLED = Error.new(code: "FORBIDDEN", message: "Sign up is closed to the public. Ask an administrator to send you an invitation")
   INVALID_CREDENTIALS = Error.new(code: "INVALID_CREDENTIALS", message: "Invalid email or password")
   INVALID_CODE = Error.new(code: "INVALID_CODE", message: "This code is invalid or has expired")
+  INVALID_INVITATION = Error.new(code: "INVALID_INVITATION", message: "This invitation is invalid or has expired")
   VALIDATION_FAILED =Error.new(code: "VALIDATION_FAILED", message: "Validation failed")
   FIELD_REQUIRED = Error.new(code: "VALIDATION_FAILED", message: "is required")
   FIELD_INVALID = Error.new(code: "VALIDATION_FAILED", message: "is invalid")

@@ -48,7 +48,7 @@ RSpec.describe "Rate limiting and request guards", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-    it "caps account creation per IP per hour" do
+    it "caps account creation per IP per hour", :public_sign_up do
       2.times do |round|
         10.times { |i| gql(sign_up, variables: { input: { email: "r#{round}x#{i}@example.test", password: "a long password" } }) }
         travel 61.seconds
@@ -101,6 +101,55 @@ RSpec.describe "Rate limiting and request guards", type: :request do
     it "lists every logged-in mutation that checks a password or a code" do
       expect(Rack::Attack::EMAIL_CHANGE_OPERATIONS).to match_array(%w[requestEmailChange confirmEmailChange])
       expect(Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }).to include(*Rack::Attack::EMAIL_CHANGE_OPERATIONS)
+    end
+  end
+
+  describe "invitation operations" do
+    let(:admin) { create(:user, :super_admin) }
+    let(:token) { token_for(admin) }
+    let(:invite) { "mutation($input: InviteUserInput!) { inviteUser(input: $input) { success errors { code } } }" }
+    let(:resend) { "mutation($input: ResendInvitationInput!) { resendInvitation(input: $input) { success errors { code } } }" }
+    let(:revoke) { "mutation($input: RevokeInvitationInput!) { revokeInvitation(input: $input) { success errors { code } } }" }
+
+    it "allows 30 per hour per IP, across the three operations, then answers 429 RATE_LIMITED with retry-after" do
+      30.times { |i| gql(invite, variables: { input: { email: "n#{i}@example.test", role: "MEMBER" } }, token:) }
+      expect(response).to have_http_status(:ok)
+
+      gql(revoke, variables: { input: { email: "n1@example.test" } }, token:)
+
+      expect_error(:too_many_requests, :RATE_LIMITED)
+      expect(response.headers["retry-after"]).to eq("3600")
+    end
+
+    it "starts again after the period" do
+      31.times { |i| gql(invite, variables: { input: { email: "n#{i}@example.test", role: "MEMBER" } }, token:) }
+      travel 61.minutes
+
+      gql(resend, variables: { input: { email: "n1@example.test" } }, token:)
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "blocks several invitation operations in one request (aliases multiply emails)" do
+      gql("mutation { a: inviteUser(input: { email: \"a@example.test\", role: MEMBER }) { success } b: inviteUser(input: { email: \"b@example.test\", role: MEMBER }) { success } }", token:)
+
+      expect_error(:bad_request, :BAD_REQUEST)
+      expect(Invitation.count).to eq(0)
+    end
+
+    it "counts acceptInvitation as a public operation (10 per minute per IP)" do
+      accept = "mutation($input: AcceptInvitationInput!) { acceptInvitation(input: $input) { token errors { code } } }"
+      10.times { gql(accept, variables: { input: { invitationToken: "x", password: "a long password" } }) }
+      expect(response).to have_http_status(:ok)
+
+      gql(accept, variables: { input: { invitationToken: "x", password: "a long password" } })
+
+      expect_error(:too_many_requests, :RATE_LIMITED)
+    end
+
+    it "lists every logged-in mutation that sends or looks up an invitation" do
+      expect(Rack::Attack::INVITATION_OPERATIONS).to match_array(%w[inviteUser resendInvitation revokeInvitation])
+      expect(Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }).to include(*Rack::Attack::INVITATION_OPERATIONS)
     end
   end
 

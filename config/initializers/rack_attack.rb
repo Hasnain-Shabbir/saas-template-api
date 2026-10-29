@@ -1,9 +1,11 @@
 class Rack::Attack
   # Mutations an anonymous caller can reach (the ones that override `ready?`). A spec fails if this list drifts.
-  PUBLIC_OPERATIONS = %w[login signUp requestPasswordReset resetPassword].freeze
+  PUBLIC_OPERATIONS = %w[login signUp requestPasswordReset resetPassword acceptInvitation].freeze
   # Logged-in mutations that check a password or guess a code. Limited like public ones (per IP: the middleware runs before Warden,
   # and a token is never decoded without verification). A spec fails if one is missing.
   EMAIL_CHANGE_OPERATIONS = %w[requestEmailChange confirmEmailChange].freeze
+  # Logged-in mutations that send an invitation email or look one up by address. Limited per IP like the email change.
+  INVITATION_OPERATIONS = %w[inviteUser resendInvitation revokeInvitation].freeze
   MAX_BODY_BYTES = 100 * 1024
 
   # Parse the GraphQL POST body once per request and remember it in the Rack env.
@@ -39,6 +41,10 @@ class Rack::Attack
     field_names(req).select { |name| EMAIL_CHANGE_OPERATIONS.include?(name) }
   end
 
+  def self.invitation_operations(req)
+    field_names(req).select { |name| INVITATION_OPERATIONS.include?(name) }
+  end
+
   def self.collect_field_names(node)
     own = node.is_a?(GraphQL::Language::Nodes::Field) ? [ node.name ] : []
     own + node.children.flat_map { |child| collect_field_names(child) }
@@ -51,6 +57,9 @@ class Rack::Attack
 
   # Same reason for the email change: aliases would multiply password and code guesses.
   blocklist("graphql/batched-email-change-operations") { |req| email_change_operations(req).size > 1 }
+
+  # Aliases would multiply invitation emails.
+  blocklist("graphql/batched-invitation-operations") { |req| invitation_operations(req).size > 1 }
 
   # Per IP, for everything an anonymous caller can reach.
   throttle("public-operations/ip", limit: 10, period: 1.minute) do |req|
@@ -65,6 +74,11 @@ class Rack::Attack
   # Per IP, mail and guess abuse of the email change (the code itself also dies after 5 wrong guesses).
   throttle("email-change/ip", limit: 10, period: 1.hour) do |req|
     req.ip if email_change_operations(req).any?
+  end
+
+  # Per IP, invitation mail abuse (for example with a stolen admin token).
+  throttle("invitations/ip", limit: 30, period: 1.hour) do |req|
+    req.ip if invitation_operations(req).any?
   end
 
   self.blocklisted_responder = lambda do |_req|

@@ -9,5 +9,9 @@ module Types
     field :reset_password, mutation: Mutations::Auth::ResetPassword
     field :request_email_change, mutation: Mutations::Auth::RequestEmailChange
     field :confirm_email_change, mutation: Mutations::Auth::ConfirmEmailChange
+    field :invite_user, mutation: Mutations::Invitations::InviteUser
+    field :accept_invitation, mutation: Mutations::Invitations::AcceptInvitation
+    field :revoke_invitation, mutation: Mutations::Invitations::RevokeInvitation
+    field :resend_invitation, mutation: Mutations::Invitations::ResendInvitation
   end
 end

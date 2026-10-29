@@ -20,7 +20,7 @@ RSpec.describe "Authorization", type: :request do
       expect(gql(me_with_role, token: token_for(create(:user))).dig("data", "me", "role")).to eq("MEMBER")
     end
 
-    it "comes back from signUp as MEMBER" do
+    it "comes back from signUp as MEMBER", :public_sign_up do
       body = gql("mutation($i: SignUpInput!) { signUp(input: $i) { user { role } } }",
                  variables: { i: { email: "fresh@example.test", password: "correct horse battery" } })
 
@@ -39,7 +39,7 @@ RSpec.describe "Authorization", type: :request do
       expect(Types::UserRoleEnum.values.values.map(&:value)).to match_array(User.roles.keys)
     end
 
-    it "cannot be set by the client on signUp" do
+    it "cannot be set by the client on signUp", :public_sign_up do
       body = gql("mutation($i: SignUpInput!) { signUp(input: $i) { token } }",
                  variables: { i: { email: "sneaky@example.test", password: "correct horse battery", role: "SUPER_ADMIN" } })
 
@@ -150,7 +150,7 @@ RSpec.describe "Authorization", type: :request do
 
   # Default deny: every operation is public (and throttled) or has a permission test above.
   describe "coverage" do
-    let(:covered) { %w[me logout requestEmailChange confirmEmailChange] }
+    let(:covered) { %w[me logout requestEmailChange confirmEmailChange inviteUser revokeInvitation resendInvitation] }
 
     it "lists exactly the logged-in operations that have a permission test" do
       mutations = Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }
