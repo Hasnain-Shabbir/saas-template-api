@@ -13,5 +13,8 @@ module Types
     field :accept_invitation, mutation: Mutations::Invitations::AcceptInvitation
     field :revoke_invitation, mutation: Mutations::Invitations::RevokeInvitation
     field :resend_invitation, mutation: Mutations::Invitations::ResendInvitation
+    field :update_profile, mutation: Mutations::Profiles::UpdateProfile
+    field :update_address, mutation: Mutations::Addresses::UpdateAddress
+    field :accept_terms, mutation: Mutations::Terms::AcceptTerms
   end
 end

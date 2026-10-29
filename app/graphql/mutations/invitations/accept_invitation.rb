@@ -10,6 +10,7 @@ module Mutations
 
       field :token, String, description: "Token to send as `Authorization: Bearer <token>` on later requests"
       field :user, Types::UserType, description: "The user that was created"
+      field :onboarding, Types::OnboardingType, description: "The onboarding steps of the new user. `currentStep` is the step to open first. Same data as `me { onboarding }`"
       field :errors, [ Types::UserErrorType ], null: false, description: "Expected failures. Empty when the operation succeeded"
 
       # Public operation: the invitation token is the proof.
@@ -21,7 +22,7 @@ module Mutations
         result = ::Invitations::Accept.call(token: invitation_token, password:)
         value = result.value || {}
 
-        { token: value[:token], user: value[:user], errors: errors_from(result) }
+        { token: value[:token], user: value[:user], onboarding: value[:onboarding], errors: errors_from(result) }
       end
     end
   end

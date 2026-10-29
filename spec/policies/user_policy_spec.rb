@@ -7,7 +7,7 @@ RSpec.describe UserPolicy do
     describe "as a #{role}" do
       let(:user) { create(:user, role.to_sym) }
 
-      %i[show? logout? change_email?].each do |action|
+      %i[show? logout? change_email? update_profile? update_address? accept_terms?].each do |action|
         it "allows #{action} on themselves" do
           expect(described_class.new(user, user).public_send(action)).to be(true)
         end
@@ -28,6 +28,6 @@ RSpec.describe UserPolicy do
   it "denies everything when nobody is logged in" do
     policy = described_class.new(nil, other)
 
-    expect(%i[index? show? create? update? destroy? logout? change_email?].map { |action| policy.public_send(action) }).to all(be(false))
+    expect(%i[index? show? create? update? destroy? logout? change_email? update_profile? update_address? accept_terms?].map { |action| policy.public_send(action) }).to all(be(false))
   end
 end

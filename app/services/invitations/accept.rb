@@ -18,7 +18,8 @@ module Invitations
         next Errors.failure(Errors::VALIDATION_FAILED, errors: user.errors) unless user.save
 
         invitation.update!(accepted_at: Time.current, token_digest: nil)
-        Result.success(user:, token: Auth::IssueToken.call(user))
+        # The new user has done no step yet, so this tells the client which step to open first.
+        Result.success(user:, token: Auth::IssueToken.call(user), onboarding: Onboarding::Status.call(user:).value)
       end
     rescue ActiveRecord::RecordNotUnique
       invalid # the email was taken at the same moment

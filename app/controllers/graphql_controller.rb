@@ -16,6 +16,9 @@ class GraphqlController < ApplicationController
     # Authentication comes before everything GraphQL checks (arguments, enums, variables): nobody logged in gets UNAUTHENTICATED only.
     return render json: { data: nil }.merge(Errors.response_body(Errors::UNAUTHENTICATED)) if user.nil? && AuthGate.login_required?(query, operation_name:)
 
+    # Then onboarding: a user with steps left can only reach the operations that let them finish (and log out).
+    return render json: { data: nil }.merge(Errors.response_body(Errors::ONBOARDING_REQUIRED)) if user && OnboardingGate.blocked?(user, query, operation_name:)
+
     context = {
       current_user: user,
       token: bearer_token

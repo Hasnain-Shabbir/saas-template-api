@@ -237,6 +237,27 @@ RSpec.describe "Invitations", type: :request do
       expect(Invitation.find_by!(email: "fresh@example.test")).to have_attributes(accepted_at: be_present, token_digest: nil)
     end
 
+    it "returns the onboarding so the client knows which step to open first" do
+      stub_onboarding_steps(*real_onboarding_steps)
+      query = "mutation($i: AcceptInvitationInput!) { acceptInvitation(input: $i) { onboarding { completed currentStep steps { key completed } } } }"
+
+      body = gql(query, variables: { i: { invitationToken: token, password: } })
+
+      expect(body.dig("data", "acceptInvitation", "onboarding")).to eq(
+        "completed" => false, "currentStep" => "profile", "steps" => [ { "key" => "profile", "completed" => false }, { "key" => "address", "completed" => false }, { "key" => "terms", "completed" => false } ]
+      )
+    end
+
+    it "returns a completed onboarding for a role with no steps" do
+      stub_onboarding_steps(*real_onboarding_steps)
+      create(:invitation, email: "boss@example.test", role: "super_admin", token_digest: Invitation.digest("T" * 43))
+      query = "mutation($i: AcceptInvitationInput!) { acceptInvitation(input: $i) { onboarding { completed currentStep steps { key } } } }"
+
+      body = gql(query, variables: { i: { invitationToken: "T" * 43, password: } })
+
+      expect(body.dig("data", "acceptInvitation", "onboarding")).to eq("completed" => true, "currentStep" => nil, "steps" => [])
+    end
+
     it "gives the role stored on the invitation (never one from the client)" do
       create(:invitation, email: "boss@example.test", role: "super_admin", token_digest: Invitation.digest("T" * 43))
 

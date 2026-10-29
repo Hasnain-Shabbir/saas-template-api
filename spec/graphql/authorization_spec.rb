@@ -6,6 +6,13 @@ RSpec.describe "Authorization", type: :request do
   let(:request_email_change) do
     "mutation { requestEmailChange(input: { newEmail: \"fresh@example.test\", password: \"correct horse battery\" }) { success errors { code } } }"
   end
+  let(:update_profile) do
+    "mutation { updateProfile(input: { firstName: \"Ada\", lastName: \"Lovelace\", dateOfBirth: \"1990-05-21\", phone: \"+14155552671\" }) { errors { code } } }"
+  end
+  let(:update_address) do
+    "mutation { updateAddress(input: { addressLine1: \"1 Market Street\", city: \"San Francisco\", state: \"CA\", postalCode: \"94105\", country: \"US\" }) { errors { code } } }"
+  end
+  let(:accept_terms) { "mutation { acceptTerms(input: { version: \"#{Terms::Current::VERSION}\" }) { errors { code } } }" }
   let(:confirm_email_change) { "mutation { confirmEmailChange(input: { code: \"123456\" }) { success errors { code } } }" }
 
   def error_code(body)
@@ -69,6 +76,31 @@ RSpec.describe "Authorization", type: :request do
           expect(body.dig("data", "confirmEmailChange", "errors", 0, "code")).to eq("INVALID_CODE")
         end
 
+        it "may read their own onboarding" do
+          expect(gql("{ me { onboarding { completed } } }", token: token_for(user)).dig("data", "me", "onboarding", "completed")).to be(true)
+        end
+
+        it "may save their own profile" do
+          body = gql(update_profile, token: token_for(user))
+
+          expect(body.dig("data", "updateProfile", "errors")).to eq([])
+          expect(user.reload.first_name).to eq("Ada")
+        end
+
+        it "may save their own address" do
+          body = gql(update_address, token: token_for(user))
+
+          expect(body.dig("data", "updateAddress", "errors")).to eq([])
+          expect(user.reload.city).to eq("San Francisco")
+        end
+
+        it "may accept the terms for themselves" do
+          body = gql(accept_terms, token: token_for(user))
+
+          expect(body.dig("data", "acceptTerms", "errors")).to eq([])
+          expect(user.reload.terms_version).to eq(Terms::Current::VERSION)
+        end
+
         it "may log out" do
           body = gql(logout, token: token_for(user))
 
@@ -85,6 +117,18 @@ RSpec.describe "Authorization", type: :request do
 
     it "denies logout with UNAUTHENTICATED" do
       expect(error_code(gql(logout))).to eq("UNAUTHENTICATED")
+    end
+
+    it "denies updateAddress with UNAUTHENTICATED" do
+      expect(error_code(gql(update_address))).to eq("UNAUTHENTICATED")
+    end
+
+    it "denies acceptTerms with UNAUTHENTICATED" do
+      expect(error_code(gql(accept_terms))).to eq("UNAUTHENTICATED")
+    end
+
+    it "denies updateProfile with UNAUTHENTICATED" do
+      expect(error_code(gql(update_profile))).to eq("UNAUTHENTICATED")
     end
 
     it "denies requestEmailChange and confirmEmailChange with UNAUTHENTICATED" do
@@ -150,7 +194,7 @@ RSpec.describe "Authorization", type: :request do
 
   # Default deny: every operation is public (and throttled) or has a permission test above.
   describe "coverage" do
-    let(:covered) { %w[me logout requestEmailChange confirmEmailChange inviteUser revokeInvitation resendInvitation] }
+    let(:covered) { %w[me logout requestEmailChange confirmEmailChange inviteUser revokeInvitation resendInvitation updateProfile updateAddress acceptTerms] }
 
     it "lists exactly the logged-in operations that have a permission test" do
       mutations = Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }

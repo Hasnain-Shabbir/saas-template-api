@@ -7,6 +7,12 @@ class UserPolicy < ApplicationPolicy
 
   def change_email? = self?
 
+  def update_profile? = self?
+
+  def update_address? = self?
+
+  def accept_terms? = self?
+
   private
 
   def self?
