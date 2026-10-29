@@ -13,10 +13,23 @@
 #   inv_mint EMAIL ROLE  create an open invitation for EMAIL and print its plain token (the invitee's inbox). Test mode only:
 #                        production mode has another secret key, so its digests do not match
 #   inv_expire    make the open invitation of EMAIL expired
+#   terms_version print the version of the terms the server accepts now (EMAIL is ignored)
+#   profile_raw   print JSON: the stored (raw) first name, last name, date of birth and phone of EMAIL, as the database holds them
 #   inv_state     print JSON: invitations of EMAIL (role, accepted, revoked, digest present), and whether a user exists
 abort "test database only" unless Rails.env.test?
 
 action, email = ARGV
+
+if action == "terms_version"
+  print Terms::Current::VERSION
+  exit
+end
+
+if action == "profile_raw"
+  row = User.connection.select_one(User.sanitize_sql([ "SELECT first_name, last_name, date_of_birth, phone FROM users WHERE email = ?", email ]))
+  print JSON.generate(row || {})
+  exit
+end
 
 if action.start_with?("inv_")
   case action

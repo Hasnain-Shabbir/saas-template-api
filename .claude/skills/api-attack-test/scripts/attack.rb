@@ -55,7 +55,41 @@ ME     = "{ me { id email } }"
 PW = "Str0ng-Passw0rd!"
 
 def uniq = "qa#{SecureRandom.hex(5)}@example.test"
-def signup(email, pw = PW) = gql(SIGNUP, variables: { i: { email: email, password: pw } })
+# Members must finish onboarding before the API lets them do anything else (OnboardingGate). A user made here is onboarded at once,
+# so every other section can use it. Section N and P pass `onboard: false` to test the gate and the profile themselves.
+MY_ONB = "{ me { onboarding { completed currentStep steps { key completed completedAt } } } }"
+UPDATE_PROFILE = "mutation P($i: UpdateProfileInput!){ updateProfile(input:$i){ user{ id firstName lastName dateOfBirth phone } errors{message path code} } }"
+UPDATE_ADDRESS = "mutation A($i: UpdateAddressInput!){ updateAddress(input:$i){ user{ id addressLine1 addressLine2 city state postalCode country } errors{message path code} } }"
+ACCEPT_TERMS = "mutation T($i: AcceptTermsInput!){ acceptTerms(input:$i){ user{ id termsVersion termsAcceptedAt } errors{message path code} } }"
+PROFILE = { firstName: "Qa", lastName: "Tester", dateOfBirth: "1990-05-21", phone: "+14155552671" }.freeze
+ADDRESS = { addressLine1: "1 Market Street", addressLine2: "Suite 4", city: "San Francisco", state: "CA", postalCode: "94105", country: "US" }.freeze
+
+# The server finishes a step itself when the data of the step is saved: there is no "complete step" operation. The version of the terms
+# is read from the test database (the client of the real API ships it with the terms text it shows).
+def terms_version = @terms_version ||= IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", File.join(__dir__, "otp_helper.rb"), "terms_version", "-" ], chdir: File.expand_path("../../../..", __dir__), err: File::NULL, &:read).to_s.strip
+def prof_save(token, extra = {}) = gql(UPDATE_PROFILE, variables: { i: PROFILE.merge(extra) }, token: token)
+def addr_save(token, extra = {}) = gql(UPDATE_ADDRESS, variables: { i: ADDRESS.merge(extra) }, token: token)
+def terms_save(token, version = terms_version, extra = {}) = gql(ACCEPT_TERMS, variables: { i: { version: version }.merge(extra) }, token: token)
+def op_errs(r, op) = r[:json]&.dig("data", op, "errors")
+def onb_of(token) = gql(MY_ONB, token: token)[:json]&.dig("data", "me", "onboarding")
+
+# Saves the data of every step (profile, address, terms): the server marks the steps done. Does nothing for a user who has no steps (a super_admin).
+def onboard!(token)
+  return unless token
+
+  state = onb_of(token)
+  return if state.nil? || state["completed"]
+
+  prof_save(token)
+  addr_save(token)
+  terms_save(token)
+end
+
+def signup(email, pw = PW, onboard: true)
+  r = gql(SIGNUP, variables: { i: { email: email, password: pw } })
+  onboard!(tok_of(r)) if onboard
+  r
+end
 def login(email, pw = PW) = gql(LOGIN, variables: { i: { email: email, password: pw } })
 def tok_of(r, op = "signUp") = r[:json]&.dig("data", op, "token")
 def errs_of(r, op = "signUp") = r[:json]&.dig("data", op, "errors")
@@ -720,17 +754,22 @@ check("M4", "extra input fields (inviterId, tokenDigest, acceptedAt, role, email
       mass.all? { |x| x[:json]&.dig("errors") && !x[:body].include?("INTERNAL_ERROR") }, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
 
 # Same answer for a new email and an email that already has an account (no enumeration, not even for a super_admin).
-m_new = uniq
-m_taken = uniq
-signup(m_taken)
-a_new = inv(m_admin_tok, m_new)
-a_taken = inv(m_admin_tok, m_taken)
-check("M5", "inviting a new email and an email with an account: exactly the same answer",
-      a_new[:json] == a_taken[:json] && a_new[:json]&.dig("data", "inviteUser", "success") == true, "#{a_new[:body][0, 90]} | #{a_taken[:body][0, 90]}", bad: "HIGH")
-check("M5b", "revoke and resend of a never-invited email answer success too (nothing to learn)",
-      [ inv_revoke(m_admin_tok, uniq), inv_resend(m_admin_tok, uniq) ].all? { |x| x[:json]&.dig("data")&.values&.first&.dig("success") == true }, bad: "MEDIUM")
-check("M5c", "a badly formed email is VALIDATION_FAILED on all three", [ inv(m_admin_tok, "nope"), inv_revoke(m_admin_tok, "nope"), inv_resend(m_admin_tok, "nope") ]
-      .all? { |x| x[:json]&.dig("data")&.values&.first&.dig("errors", 0, "code") == "VALIDATION_FAILED" }, bad: "MEDIUM")
+# Needs a super_admin, and only the test database can make one (otp_helper), so prod mode cannot run M5 to M5c.
+if LABEL == "test"
+  m_new = uniq
+  m_taken = uniq
+  signup(m_taken)
+  a_new = inv(m_admin_tok, m_new)
+  a_taken = inv(m_admin_tok, m_taken)
+  check("M5", "inviting a new email and an email with an account: exactly the same answer",
+        a_new[:json] == a_taken[:json] && a_new[:json]&.dig("data", "inviteUser", "success") == true, "#{a_new[:body][0, 90]} | #{a_taken[:body][0, 90]}", bad: "HIGH")
+  check("M5b", "revoke and resend of a never-invited email answer success too (nothing to learn)",
+        [ inv_revoke(m_admin_tok, uniq), inv_resend(m_admin_tok, uniq) ].all? { |x| x[:json]&.dig("data")&.values&.first&.dig("success") == true }, bad: "MEDIUM")
+  check("M5c", "a badly formed email is VALIDATION_FAILED on all three", [ inv(m_admin_tok, "nope"), inv_revoke(m_admin_tok, "nope"), inv_resend(m_admin_tok, "nope") ]
+        .all? { |x| x[:json]&.dig("data")&.values&.first&.dig("errors", 0, "code") == "VALIDATION_FAILED" }, bad: "MEDIUM")
+else
+  rec("M5", "same answer for new and existing email needs a super_admin (test mode only)", "INFO")
+end
 
 m_batch = gql("mutation { a: inviteUser(input: { email: \"#{uniq}\", role: MEMBER }) { success } b: inviteUser(input: { email: \"#{uniq}\", role: MEMBER }) { success } }", token: m_admin_tok)
 check("M6", "several invitation operations in one request are refused as a whole (aliases multiply emails)", code(m_batch) == "BAD_REQUEST" && m_batch[:status] == 400, m_batch[:body][0, 100], bad: "HIGH")
@@ -775,6 +814,7 @@ if LABEL == "test"
   e, t = mint.call
   inv_accept(t)
   m_new_tok = tok_of(login(e), "login")
+  onboard!(m_new_tok) # the gate comes before authorization: without this the answer would be ONBOARDING_REQUIRED, not FORBIDDEN
   r = inv(m_new_tok, uniq)
   check("M15", "a user made by an invitation as member cannot invite (no privilege from the invitation flow)", code(r) == "FORBIDDEN", r[:body][0, 100], bad: "CRITICAL")
 
@@ -807,6 +847,213 @@ if LABEL == "prod"
   check("M17", "31st invitation operation from one IP in an hour -> 429", codes[30..].all? { |c| c == 429 } && codes[0..29].none? { |c| c == 429 }, codes.tally.inspect, bad: "HIGH")
   $pinned_ip = nil
 end
+
+# ---------- N. Onboarding ----------
+# Black-box checks that hold for any registry. These users are made with `onboard: false`, so they still have steps to do.
+# The server finishes a step when its data is saved. A client cannot mark a step done: there is no operation for it (N3).
+OTHER_OP = "mutation { requestEmailChange(input:{ newEmail:\"#{uniq}\", password:\"#{PW}\" }){ success } }" # any closed operation will do
+
+n_a = tok_of(signup(uniq, onboard: false))
+n_b = tok_of(signup(uniq, onboard: false))
+
+none = [ gql(MY_ONB), gql(MY_ONB, token: "garbage"), terms_save(nil), terms_save("garbage"), gql(ACCEPT_TERMS, variables: { i: {} }) ]
+check("N1", "me { onboarding } and acceptTerms: no token, a garbage token, or bad input as nobody is UNAUTHENTICATED",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+n_state = onb_of(n_a)
+n_steps = n_state&.dig("steps") || []
+check("N2", "me { onboarding } shows only completed, currentStep, steps (key, completed, completedAt): no roles, no checks, no operations",
+      n_state && n_state.keys.sort == %w[completed currentStep steps] && n_steps.all? { |x| x.keys.sort == %w[completed completedAt key] }, n_state.inspect[0, 200], bad: "MEDIUM")
+
+old_op = gql("mutation { completeOnboardingStep(input:{ stepKey:\"profile\" }){ errors{code} } }", token: n_a)
+check("N3", "a client cannot mark a step done: completeOnboardingStep does not exist (schema error, no data), and the steps did not change",
+      clean?(old_op) && old_op[:json]&.dig("errors") && old_op[:json]["data"].nil? && onb_of(n_a) == n_state, old_op[:body][0, 120], bad: "CRITICAL")
+
+hostile = [ "", "   ", "' OR 1=1 --", "x" * 10_000, "🔥" * 50, "../../etc/passwd", "<script>alert(1)</script>", "{\"$ne\":null}", "#{terms_version} " + "x" ]
+rs = hostile.map { |v| terms_save(n_a, v) }
+check("N4", "hostile or empty terms versions: a clean answer (VALIDATION_FAILED), never a 500, and no step is finished",
+      rs.all? { |x| clean?(x) && (op_errs(x, "acceptTerms")&.first&.dig("code") == "VALIDATION_FAILED" || x[:json]&.dig("errors")) } && onb_of(n_a) == n_state, rs.map { |x| x[:body][0, 60] }.uniq.first(3).inspect, bad: "HIGH")
+
+mass = [ terms_save(n_a, terms_version, { userId: SecureRandom.uuid }), terms_save(n_a, terms_version, { role: "SUPER_ADMIN" }), terms_save(n_a, terms_version, { termsAcceptedAt: "2020-01-01T00:00:00Z" }) ]
+check("N5", "extra input fields (userId, role, termsAcceptedAt) are rejected by the schema: a user cannot name another user or set the time",
+      mass.all? { |x| x[:json]&.dig("errors") && !x[:body].include?("INTERNAL_ERROR") } && onb_of(n_a) == n_state, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+batch = "mutation { " + (1..50).map { |i| "a#{i}: acceptTerms(input:{version:\"x\"}){ errors{code} }" }.join(" ") + " }"
+check("N6", "50 aliased acceptTerms calls: refused or answered, never a 500", clean?(gql(batch, token: n_a)), gql(batch, token: n_a)[:body][0, 100], bad: "MEDIUM")
+
+lo = gql("mutation { logout(input:{}){ success } }", token: tok_of(signup(uniq)))
+n_c = tok_of(signup(uniq, onboard: false))
+gql("mutation { logout(input:{}){ success } }", token: n_c)
+check("N7", "a token after logout is UNAUTHENTICATED on both operations", code(gql(MY_ONB, token: n_c)) == "UNAUTHENTICATED" && code(terms_save(n_c)) == "UNAUTHENTICATED", bad: "CRITICAL")
+
+blocked_op = gql(OTHER_OP, token: n_a)
+if n_steps.empty?
+  check("N8", "no steps in the registry: nobody is blocked (me { onboarding } is complete, other operations are not ONBOARDING_REQUIRED)",
+        n_state&.dig("completed") == true && code(blocked_op) != "ONBOARDING_REQUIRED", blocked_op[:body][0, 100], bad: "MEDIUM")
+  rec("N9-13", "gate, order, isolation and idempotence checks need a step in the registry (specs cover them)", "INFO")
+else
+  aliased = gql(OTHER_OP.sub("mutation { ", "mutation { me: "), token: n_a)
+  frag = gql("mutation { ...F } fragment F on Mutation { " + OTHER_OP.sub("mutation { ", "").sub(/ \}\z/, "") + " }", token: n_a)
+  check("N8", "with steps open: a closed operation is ONBOARDING_REQUIRED, also behind an alias or a fragment; me (with its onboarding) still answers",
+        [ blocked_op, aliased, frag ].all? { |x| code(x) == "ONBOARDING_REQUIRED" } && gql(ME, token: n_a)[:json]&.dig("data", "me", "id") && !n_state.nil?, [ blocked_op, aliased, frag ].map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+  if n_steps.size > 1
+    r = terms_save(n_a)
+    after = onb_of(n_a)
+    check("N10", "the terms step before the profile: the data is saved but no step is finished out of order, and the gate stays closed",
+          op_errs(r, "acceptTerms") == [] && after&.dig("steps")&.none? { |x| x["completed"] } && code(gql(OTHER_OP, token: n_a)) == "ONBOARDING_REQUIRED", after.inspect[0, 140], bad: "HIGH")
+  else
+    rec("N10", "order check needs two steps in the registry", "INFO")
+  end
+
+  r1 = terms_save(n_b)
+  r2 = terms_save(n_b)
+  check("N11", "the same data twice: the same answer both times (no errors), never a 500", clean?(r1) && clean?(r2) && op_errs(r1, "acceptTerms") == [] && op_errs(r2, "acceptTerms") == [], "#{r1[:body][0, 60]} | #{r2[:body][0, 60]}", bad: "MEDIUM")
+
+  rs = 8.times.map { Thread.new { terms_save(n_b) } }.map(&:value)
+  check("N12", "8 parallel acceptTerms of one user: no 500, all succeed", rs.all? { |x| clean?(x) && op_errs(x, "acceptTerms") == [] }, rs.map { |x| x[:body][0, 60] }.tally.inspect, bad: "HIGH")
+
+  # With the work done, the gate opens for B, and A (who only sent the terms) stays blocked and unchanged.
+  a_before = onb_of(n_a)
+  onboard!(n_b)
+  check("N13", "user B finishes onboarding: the gate opens for B (a closed operation is not ONBOARDING_REQUIRED), and user A is untouched and still blocked",
+        onb_of(n_b)&.dig("completed") == true && code(gql(OTHER_OP, token: n_b)) != "ONBOARDING_REQUIRED" && onb_of(n_a) == a_before && code(gql(OTHER_OP, token: n_a)) == "ONBOARDING_REQUIRED",
+        "#{onb_of(n_b).inspect[0, 80]} | #{onb_of(n_a).inspect[0, 80]}", bad: "CRITICAL")
+end
+
+# ---------- P. Profile (updateProfile, and the profile fields of me) ----------
+def prof(token, extra = {}) = gql(UPDATE_PROFILE, variables: { i: PROFILE.merge(extra) }, token: token)
+def prof_errs(r) = r[:json]&.dig("data", "updateProfile", "errors")
+def me_profile(token) = gql("{ me { firstName lastName dateOfBirth phone } }", token: token)[:json]&.dig("data", "me")
+def raw_profile(email) = (JSON.parse(otp("profile_raw", email)) rescue {})
+EMPTY_PROFILE = { "firstName" => nil, "lastName" => nil, "dateOfBirth" => nil, "phone" => nil }.freeze
+
+p_a_email = uniq
+p_a = tok_of(signup(p_a_email, onboard: false))
+p_b_email = uniq
+p_b = tok_of(signup(p_b_email, onboard: false))
+
+none = [ prof(nil), prof("garbage"), gql(UPDATE_PROFILE, variables: { i: {} }), gql(UPDATE_PROFILE, variables: { i: { firstName: "x" } }, token: "garbage") ]
+check("P1", "updateProfile: no token, a garbage token, or bad input as nobody is UNAUTHENTICATED (401 comes before validation)",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+check("P2", "a new user has an empty profile", me_profile(p_a) == EMPTY_PROFILE, me_profile(p_a).inspect, bad: "LOW")
+
+bad = { phone: [ "4155552671", "+0123456789", "+1234567", "+1" + "2" * 20, "abc", "' OR 1=1 --" ], dateOfBirth: [ "2999-01-01", "1700-01-01", "not-a-date", "2000-13-45" ] }
+rs = bad.flat_map { |field, values| values.map { |v| [ field, prof(p_a, { field => v }) ] } }
+check("P3", "a wrong phone or date of birth is refused (VALIDATION_FAILED naming the field, or a schema error), never a 500, and nothing is saved",
+      rs.all? { |field, x| clean?(x) && (prof_errs(x)&.any? { |e| e["code"] == "VALIDATION_FAILED" && e["path"].last == field.to_s } || x[:json]&.dig("errors")) } && me_profile(p_a) == EMPTY_PROFILE,
+      rs.map { |_, x| x[:body][0, 60] }.uniq.first(3).inspect, bad: "HIGH")
+
+hostile = [ "", "   ", "' OR 1=1 --", "x" * 10_000, "🔥" * 50, "<script>alert(1)</script>", "{\"$ne\":null}", "${7*7}", "\r\nBcc: evil@example.test" ]
+rs = hostile.flat_map { |v| [ prof(p_a, { firstName: v }), prof(p_a, { lastName: v }) ] }
+check("P4", "hostile or empty names: a clean answer, never a 500", rs.all? { |x| clean?(x) }, rs.map { |x| x[:status] }.tally.inspect, bad: "HIGH")
+# The hostile values above are valid, so P4 saved some. Use a fresh user for the checks that need an empty profile.
+p_c = tok_of(signup(uniq, onboard: false))
+check("P4a", "an empty name is \"required\" (not \"invalid\"), 100 characters are accepted and 101 are refused",
+      prof_errs(prof(p_c, { firstName: "" }))&.first&.values_at("message", "code") == [ "First name is required", "VALIDATION_FAILED" ] &&
+      prof_errs(prof(p_c, { firstName: "a" * 101 }))&.first&.dig("code") == "VALIDATION_FAILED" && me_profile(p_c) == EMPTY_PROFILE, bad: "MEDIUM")
+
+mass = [ prof(p_c, { userId: SecureRandom.uuid }), prof(p_c, { id: SecureRandom.uuid }), prof(p_c, { email: uniq }), prof(p_c, { role: "SUPER_ADMIN" }) ]
+check("P5", "extra input fields (userId, id, email, role) are rejected by the schema: no way to name another user or change the role",
+      mass.all? { |x| x[:json]&.dig("errors") && !x[:body].include?("INTERNAL_ERROR") } && me_profile(p_c) == EMPTY_PROFILE, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+r = prof(p_a)
+check("P6", "a valid profile is saved, and me shows it", prof_errs(r) == [] && me_profile(p_a) == PROFILE.transform_keys(&:to_s), r[:body][0, 140], bad: "HIGH")
+r2 = prof(p_a, { phone: "+1 415-555 2671" })
+check("P7", "the same data again (also with spaces and dashes in the phone) succeeds and changes nothing", prof_errs(r2) == [] && me_profile(p_a) == PROFILE.transform_keys(&:to_s), r2[:body][0, 100], bad: "MEDIUM")
+
+prof(p_b, { firstName: "Bea", lastName: "Other" })
+check("P8", "each user has their own profile: B's save changed nothing for A, and A's data is not in B's me",
+      me_profile(p_a)["firstName"] == "Qa" && me_profile(p_b)["firstName"] == "Bea" && !gql("{ me { firstName } }", token: p_b)[:body].include?("Qa"), bad: "CRITICAL")
+
+rs = 8.times.map { Thread.new { prof(p_a, { lastName: "Parallel" }) } }.map(&:value)
+check("P9", "8 parallel saves of the same data: no 500, all succeed, the profile is consistent", rs.all? { |x| clean?(x) && prof_errs(x) == [] } && me_profile(p_a)["lastName"] == "Parallel", rs.map { |x| x[:body][0, 60] }.tally.inspect, bad: "HIGH")
+
+raw = raw_profile(p_a_email)
+if raw.empty?
+  rec("P10", "stored-value check needs the database helper (test mode only)", "INFO")
+else
+  check("P10", "date of birth and phone are stored as ciphertext (the plain digits and year are not in the database); names are plain on purpose",
+        raw["phone"] && !raw["phone"].include?("4155552671") && raw["date_of_birth"] && !raw["date_of_birth"].include?("1990") && raw["first_name"] == "Qa", raw.inspect[0, 160], bad: "HIGH")
+end
+
+p_steps = onb_of(p_a)&.dig("steps") || []
+check("P11", "the profile step: the server finished it when the profile was saved (no client call), and the user is not complete while other steps are open",
+      p_steps.find { |x| x["key"] == "profile" }&.dig("completed") == true && (p_steps.size == 1 || onb_of(p_a)&.dig("completed") == false), onb_of(p_a).inspect[0, 160], bad: "HIGH")
+
+# ---------- Q. Address (updateAddress, and the address fields of me) ----------
+def addr_errs(r) = op_errs(r, "updateAddress")
+def me_addr(token) = gql("{ me { addressLine1 addressLine2 city state postalCode country } }", token: token)[:json]&.dig("data", "me")
+EMPTY_ADDRESS = { "addressLine1" => nil, "addressLine2" => nil, "city" => nil, "state" => nil, "postalCode" => nil, "country" => nil }.freeze
+
+q_a = tok_of(signup(uniq, onboard: false))
+q_b = tok_of(signup(uniq, onboard: false))
+
+none = [ addr_save(nil), addr_save("garbage"), gql(UPDATE_ADDRESS, variables: { i: {} }), gql(UPDATE_ADDRESS, variables: { i: { city: "x" } }, token: "garbage") ]
+check("Q1", "updateAddress: no token, a garbage token, or bad input as nobody is UNAUTHENTICATED (401 comes before validation)",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+check("Q2", "a new user has an empty address", me_addr(q_a) == EMPTY_ADDRESS, me_addr(q_a).inspect, bad: "LOW")
+
+bad = { state: [ "ZZ", "California", "c", "' OR 1=1 --" ], postalCode: [ "1234", "123456", "94105-12", "ABCDE", "94105 1234", "' OR 1=1 --" ], country: [ "CA", "USA", "us1", "' OR 1=1 --" ] }
+rs = bad.flat_map { |field, values| values.map { |v| [ field, addr_save(q_a, { field => v }) ] } }
+check("Q3", "a wrong state, ZIP code or country is refused (VALIDATION_FAILED naming the field, or a schema error), never a 500, and nothing is saved",
+      rs.all? { |field, x| clean?(x) && (addr_errs(x)&.any? { |e| e["code"] == "VALIDATION_FAILED" && e["path"].last == field.to_s } || x[:json]&.dig("errors")) } && me_addr(q_a) == EMPTY_ADDRESS,
+      rs.map { |_, x| x[:body][0, 60] }.uniq.first(3).inspect, bad: "HIGH")
+
+hostile = [ "", "   ", "' OR 1=1 --", "x" * 10_000, "🔥" * 50, "<script>alert(1)</script>", "{\"$ne\":null}", "${7*7}", "\r\nBcc: evil@example.test" ]
+rs = hostile.flat_map { |v| [ addr_save(q_a, { addressLine1: v }), addr_save(q_a, { city: v }), addr_save(q_a, { addressLine2: v }) ] }
+check("Q4", "hostile or empty text in the address lines and city: a clean answer, never a 500", rs.all? { |x| clean?(x) }, rs.map { |x| x[:status] }.tally.inspect, bad: "HIGH")
+# The hostile values above are valid, so Q4 saved some. Use a fresh user for the checks that need an empty address.
+q_c = tok_of(signup(uniq, onboard: false))
+check("Q4a", "an empty required field is \"required\" (not \"invalid\"), 100 characters are accepted and 101 are refused",
+      addr_errs(addr_save(q_c, { city: "" }))&.first&.values_at("message", "code") == [ "City is required", "VALIDATION_FAILED" ] &&
+      addr_errs(addr_save(q_c, { city: "a" * 101 }))&.first&.dig("code") == "VALIDATION_FAILED" && me_addr(q_c) == EMPTY_ADDRESS, bad: "MEDIUM")
+
+mass = [ addr_save(q_c, { userId: SecureRandom.uuid }), addr_save(q_c, { id: SecureRandom.uuid }), addr_save(q_c, { email: uniq }), addr_save(q_c, { role: "SUPER_ADMIN" }) ]
+check("Q5", "extra input fields (userId, id, email, role) are rejected by the schema: no way to name another user or change the role",
+      mass.all? { |x| x[:json]&.dig("errors") && !x[:body].include?("INTERNAL_ERROR") } && me_addr(q_c) == EMPTY_ADDRESS, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+r = addr_save(q_a)
+check("Q6", "a valid address is saved, and me shows it", addr_errs(r) == [] && me_addr(q_a) == ADDRESS.transform_keys(&:to_s), r[:body][0, 140], bad: "HIGH")
+r2 = addr_save(q_a, { state: "ca", postalCode: " 94105 " })
+check("Q7", "the same data again (also with a lower-case state and spaces around the ZIP code) succeeds and changes nothing", addr_errs(r2) == [] && me_addr(q_a) == ADDRESS.transform_keys(&:to_s), r2[:body][0, 100], bad: "MEDIUM")
+r3 = gql(UPDATE_ADDRESS, variables: { i: ADDRESS.except(:addressLine2) }, token: q_a) # not addr_save: it merges line 2 back in
+check("Q7a", "line 2 is optional: leaving it out clears it", addr_errs(r3) == [] && me_addr(q_a)["addressLine2"].nil?, r3[:body][0, 100], bad: "LOW")
+
+addr_save(q_b, { city: "Oakland" })
+check("Q8", "each user has their own address: B's save changed nothing for A, and A's data is not in B's me",
+      me_addr(q_a)["city"] == "San Francisco" && me_addr(q_b)["city"] == "Oakland" && !gql("{ me { city } }", token: q_b)[:body].include?("San Francisco"), bad: "CRITICAL")
+
+rs = 8.times.map { Thread.new { addr_save(q_a, { city: "Parallel" }) } }.map(&:value)
+check("Q9", "8 parallel saves of the same data: no 500, all succeed, the address is consistent", rs.all? { |x| clean?(x) && addr_errs(x) == [] } && me_addr(q_a)["city"] == "Parallel", rs.map { |x| x[:body][0, 60] }.tally.inspect, bad: "HIGH")
+
+q_steps = onb_of(q_a)&.dig("steps") || []
+check("Q10", "the address step: not finished while the profile step is open (order), finished by the server once the profile is saved",
+      q_steps.find { |x| x["key"] == "address" }&.dig("completed") == false && prof_errs(prof_save(q_a)) == [] && onb_of(q_a)&.dig("steps")&.find { |x| x["key"] == "address" }&.dig("completed") == true,
+      onb_of(q_a).inspect[0, 160], bad: "HIGH")
+
+# ---------- R. Terms (acceptTerms, and the terms fields of me) ----------
+def terms_errs(r) = op_errs(r, "acceptTerms")
+def me_terms(token) = gql("{ me { termsVersion termsAcceptedAt } }", token: token)[:json]&.dig("data", "me")
+
+r_a = tok_of(signup(uniq, onboard: false))
+check("R1", "a new user has accepted nothing", me_terms(r_a) == { "termsVersion" => nil, "termsAcceptedAt" => nil }, me_terms(r_a).inspect, bad: "LOW")
+
+wrong = terms_save(r_a, "1999-01-01")
+check("R2", "an old or invented version is refused with VALIDATION_FAILED on `version`, and nothing is recorded",
+      terms_errs(wrong)&.first&.values_at("path", "code") == [ %w[input version], "VALIDATION_FAILED" ] && me_terms(r_a)["termsAcceptedAt"].nil?, wrong[:body][0, 140], bad: "HIGH")
+
+ok = terms_save(r_a)
+first_time = me_terms(r_a)
+check("R3", "the current version is recorded with the server time", terms_errs(ok) == [] && first_time["termsVersion"] == terms_version && first_time["termsAcceptedAt"], ok[:body][0, 140], bad: "HIGH")
+
+terms_save(r_a)
+check("R4", "accepting again keeps the first time (the client cannot move it)", me_terms(r_a) == first_time, me_terms(r_a).inspect, bad: "MEDIUM")
+
+check("R5", "the terms step: not finished while the earlier steps are open, finished by the server after the profile and the address are saved",
+      onb_of(r_a)&.dig("steps")&.find { |x| x["key"] == "terms" }&.dig("completed") == false && (prof_save(r_a); addr_save(r_a); onb_of(r_a)&.dig("completed") == true), onb_of(r_a).inspect[0, 160], bad: "HIGH")
 
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
