@@ -36,4 +36,23 @@ RSpec.describe AuthGate do
   it "lets introspection fields through" do
     expect(required?("{ __typename }")).to be(false)
   end
+
+  describe ".root_field_names" do
+    def names(query, operation_name: nil) = described_class.root_field_names(query, operation_name:)
+
+    it "lists the real names of the root fields, through aliases and fragments" do
+      expect(names("{ a: me { id } ...F } fragment F on Query { other { id } }")).to eq(%w[me other])
+    end
+
+    it "looks only at the operation that runs" do
+      query = "query A { me { id } } query B { other { id } }"
+
+      expect(names(query, operation_name: "B")).to eq(%w[other])
+      expect(names(query)).to eq([])
+    end
+
+    it "is empty for a query that cannot be parsed" do
+      expect(names("mutation {")).to eq([])
+    end
+  end
 end

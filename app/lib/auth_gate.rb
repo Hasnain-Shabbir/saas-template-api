@@ -7,14 +7,20 @@ module AuthGate
   # not data (it is switched off in production by the schema).
   # A query that cannot be parsed, or names no single operation, returns false: GraphQL rejects it as BAD_REQUEST, with no data.
   def self.login_required?(query, operation_name: nil)
+    root_field_names(query, operation_name:).any? { |name| !public?(name) }
+  end
+
+  # The names of the root fields the operation runs (aliases cannot hide one). Empty when the query cannot be parsed or names no
+  # single operation: GraphQL rejects that as BAD_REQUEST, with no data. `OnboardingGate` uses it too.
+  def self.root_field_names(query, operation_name: nil)
     document = GraphQL.parse(query, max_tokens: SaasTemplateApiSchema.max_query_string_tokens)
     operation = pick_operation(document, operation_name)
-    return false unless operation
+    return [] unless operation
 
     fragments = document.definitions.grep(GraphQL::Language::Nodes::FragmentDefinition).index_by(&:name)
-    root_fields(operation.selections, fragments, Set.new).any? { |name| !public?(name) }
+    root_fields(operation.selections, fragments, Set.new)
   rescue GraphQL::ParseError
-    false
+    []
   end
 
   def self.public?(field_name)
