@@ -1,7 +1,7 @@
 module Mutations
   module Auth
     class SignUp < BaseMutation
-      description "Creates a user account and returns a token for a new session."
+      description "Creates a user account and returns a token for a new session. Turned off unless the server allows public sign up, then it is FORBIDDEN."
 
       null true
 
@@ -12,8 +12,10 @@ module Mutations
       field :user, Types::UserType, description: "The user the token belongs to"
       field :errors, [ Types::UserErrorType ], null: false, description: "Expected failures. Empty when the operation succeeded"
 
-      # Public operation: nobody is logged in yet.
+      # Public operation: nobody is logged in yet. Off by default (invite only), then FORBIDDEN.
       def ready?(**_args)
+        raise Errors.execution_error(Errors::SIGN_UP_DISABLED) unless Rails.configuration.x.allow_public_sign_up
+
         true
       end
 
