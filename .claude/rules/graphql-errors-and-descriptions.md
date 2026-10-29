@@ -15,6 +15,8 @@ Builds on `graphql-operations.md` and `errors-and-logging.md`. Those two define 
 - Every error has the same shape: `message` plus a stable `code` (`extensions.code` for top-level errors, `code` in `errors { message path code }` for errors as data).
 - Messages are safe for end users, short, and in plain English. No class names, SQL, paths, or record ids.
 - Unknown errors become one generic internal error code. Details go to the log and the error tracker, never to the client.
+- **Messages are descriptive and actionable.** Say what went wrong and, when the client can act, what to do next. Name the field for input errors ("Email is required", not "Invalid"). A generic message ("You are not allowed to do this") is only the fallback: an operation with a known reason gets its own constant (for example `SIGN_UP_DISABLED`: "Sign up is closed to the public. Ask an administrator to send you an invitation"). The `code` stays stable and a message must still not reveal whether an account, invitation, or tenant exists.
+- **Empty is "required", not "invalid".** An empty or blank input gives `FIELD_REQUIRED` for that field. "Invalid" (or a generic `INVALID_*` answer that hides existence) is only for a filled value that is wrong.
 - No I18n or locale files. Messages are constants in the central module.
 
 ## Success responses
