@@ -5,7 +5,11 @@
 # See the ActiveSupport::ParameterFilter documentation for supported notations and behaviors.
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
-  :code # the one-time code of password reset and email change, sent as a GraphQL variable
+  :code, # the one-time code of password reset and email change, sent as a GraphQL variable
+  # The profile. Both spellings: the parameter filter matches the key text, and GraphQL variables are camelCase.
+  :first_name, :last_name, :date_of_birth, :phone, :firstName, :lastName, :dateOfBirth,
+  # The address. `:address` also matches address_line_1 and addressLine1.
+  :address, :city, :state, :postal_code, :postalCode
 ]
 
 # GraphQL: credentials written inline in the query text, and variables sent as a JSON string, never reach the log.
