@@ -79,4 +79,12 @@ Rails.application.configure do
   config.hosts = [ ENV.fetch("APP_HOST") { raise KeyError, "APP_HOST is required" } ]
   # Skip DNS rebinding protection for the default health check endpoint.
   config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+
+  # Active Record Encryption (date of birth and phone). The keys come from the credentials (`bin/rails db:encryption:init` makes them).
+  # When these environment variables are set they are used instead: a deployment without the master key, and the attack-test script.
+  if ENV["ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY"].present?
+    config.active_record.encryption.primary_key = ENV["ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY"]
+    config.active_record.encryption.deterministic_key = ENV.fetch("ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY")
+    config.active_record.encryption.key_derivation_salt = ENV.fetch("ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT")
+  end
 end

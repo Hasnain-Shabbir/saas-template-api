@@ -53,4 +53,10 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # Active Record Encryption in tests: fixed throwaway keys. They protect no real data. Development and production read their keys
+  # from the credentials (`bin/rails db:encryption:init` makes them).
+  config.active_record.encryption.primary_key = "test-primary-key-not-a-secret"
+  config.active_record.encryption.deterministic_key = "test-deterministic-key-not-a-secret"
+  config.active_record.encryption.key_derivation_salt = "test-key-derivation-salt-not-a-secret"
 end
