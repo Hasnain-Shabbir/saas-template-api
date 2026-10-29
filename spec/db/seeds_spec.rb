@@ -17,6 +17,12 @@ RSpec.describe "db/seeds.rb" do
     expect(user.valid_password?(password)).to be(true)
   end
 
+  it "records the audit log as the seed actor" do
+    seed("SUPER_ADMIN_EMAIL" => email, "SUPER_ADMIN_PASSWORD" => password)
+
+    expect(AuditVersion.where(item_type: "User", item_id: User.find_by!(email:).id).sole.whodunnit).to eq("system:seed")
+  end
+
   it "can run twice without a second user" do
     2.times { seed("SUPER_ADMIN_EMAIL" => email, "SUPER_ADMIN_PASSWORD" => password) }
 

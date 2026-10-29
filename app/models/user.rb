@@ -6,6 +6,11 @@ class User < ApplicationRecord
          email_regexp: ValidationRules::EMAIL_FORMAT,
          password_length: ValidationRules::PASSWORD_MIN_LENGTH..ValidationRules::PASSWORD_MAX_BYTES
 
+  # Audit log: names of changed fields only. Values are stored just for the fields listed here (none is personal or a secret).
+  # `failed_attempts` alone does not make a row (a wrong password would write one each time); the lock itself (`locked_at`) does.
+  include Auditable
+  audited values: %i[role locked_at terms_version terms_accepted_at], ignore: %i[failed_attempts]
+
   # The one place roles are defined. A new role is added here and in a migration that changes the
   # `users_role_values` CHECK constraint. Permissions of a role live in the policies, not here.
   enum :role, { super_admin: "super_admin", member: "member" }, default: :member, validate: true

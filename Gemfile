@@ -59,3 +59,6 @@ gem "graphql", "~> 2.6"
 gem "pundit", "~> 2.5"
 
 gem "sidekiq", "~> 8.1"
+
+# Audit log: who changed what (Layer 2 step 1).
+gem "paper_trail", "~> 17.0"

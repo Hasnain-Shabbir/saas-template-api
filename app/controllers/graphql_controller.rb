@@ -13,6 +13,7 @@ class GraphqlController < ApplicationController
 
     variables = prepare_variables(params[:variables]) # the request envelope: a malformed one is BAD_REQUEST for everybody
     user = current_user
+    Audit.actor = user.id if user
     # Authentication comes before everything GraphQL checks (arguments, enums, variables): nobody logged in gets UNAUTHENTICATED only.
     return render json: { data: nil }.merge(Errors.response_body(Errors::UNAUTHENTICATED)) if user.nil? && AuthGate.login_required?(query, operation_name:)
 

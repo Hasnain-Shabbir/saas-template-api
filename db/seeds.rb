@@ -4,11 +4,14 @@
 email = ENV["SUPER_ADMIN_EMAIL"].presence
 password = ENV["SUPER_ADMIN_PASSWORD"].presence
 
-if email && password
-  User.find_or_create_by!(email:) do |user|
-    user.password = password
-    user.role = :super_admin
+# The audit log records these changes as "system:seed".
+Audit.as(Audit.system_actor("seed")) do
+  if email && password
+    User.find_or_create_by!(email:) do |user|
+      user.password = password
+      user.role = :super_admin
+    end
+  else
+    puts "Skipped the super admin: set SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD."
   end
-else
-  puts "Skipped the super admin: set SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD."
 end

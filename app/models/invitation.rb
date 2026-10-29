@@ -3,6 +3,10 @@ class Invitation < ApplicationRecord
   LIFETIME = 7.days
   RESEND_AFTER = 60.seconds
 
+  # Audit log: names of changed fields only, plus the values of the fields listed here. Never the email or the token digest.
+  include Auditable
+  audited values: %i[role inviter_id expires_at last_sent_at accepted_at revoked_at]
+
   belongs_to :inviter, class_name: "User", optional: true, inverse_of: :sent_invitations
 
   # Same roles as users (one place to define them). A new role also needs a migration for `invitations_role_values`.
