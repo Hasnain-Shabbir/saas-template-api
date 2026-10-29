@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_28_120004) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_28_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -24,6 +24,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_28_120004) do
     t.datetime "updated_at", null: false
     t.index ["jti"], name: "index_allowlisted_jwts_on_jti", unique: true
     t.index ["user_id"], name: "index_allowlisted_jwts_on_user_id"
+  end
+
+  create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.citext "email", null: false
+    t.string "role", null: false
+    t.uuid "inviter_id"
+    t.string "token_digest"
+    t.datetime "expires_at", null: false
+    t.datetime "last_sent_at"
+    t.datetime "accepted_at"
+    t.datetime "revoked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_invitations_one_open_per_email", unique: true, where: "((accepted_at IS NULL) AND (revoked_at IS NULL))"
+    t.index ["inviter_id"], name: "index_invitations_on_inviter_id"
+    t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
+    t.check_constraint "accepted_at IS NULL OR revoked_at IS NULL", name: "invitations_accepted_or_revoked"
+    t.check_constraint "char_length(email::text) <= 254", name: "invitations_email_length"
+    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying, 'member'::character varying]::text[])", name: "invitations_role_values"
   end
 
   create_table "one_time_codes", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -57,5 +76,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_28_120004) do
   end
 
   add_foreign_key "allowlisted_jwts", "users", on_delete: :cascade
+  add_foreign_key "invitations", "users", column: "inviter_id", on_delete: :nullify
   add_foreign_key "one_time_codes", "users", on_delete: :cascade
 end

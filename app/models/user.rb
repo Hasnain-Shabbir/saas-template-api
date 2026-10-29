@@ -10,6 +10,9 @@ class User < ApplicationRecord
   # `users_role_values` CHECK constraint. Permissions of a role live in the policies, not here.
   enum :role, { super_admin: "super_admin", member: "member" }, default: :member, validate: true
 
+  # Invitations stay (as a record of who was invited) when their inviter is deleted.
+  has_many :sent_invitations, class_name: "Invitation", foreign_key: :inviter_id, inverse_of: :inviter, dependent: :nullify
+
   normalizes :email, :pending_email, :previous_email, with: ->(email) { email.strip.downcase }
 
   validates :email, :pending_email, :previous_email, length: { maximum: ValidationRules::EMAIL_MAX_LENGTH }

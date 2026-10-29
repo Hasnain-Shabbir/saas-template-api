@@ -13,4 +13,8 @@ module ValidationRules
 
   OTP_LENGTH = 6 # digits
   OTP_FORMAT = /\A\d{#{OTP_LENGTH}}\z/
+
+  # The invitation token: random bytes, written URL-safe (base64 without padding: 4 characters per 3 bytes, rounded up).
+  INVITATION_TOKEN_BYTES = 32
+  INVITATION_TOKEN_FORMAT = /\A[A-Za-z0-9_-]{#{(INVITATION_TOKEN_BYTES * 4 / 3.0).ceil}}\z/
 end
