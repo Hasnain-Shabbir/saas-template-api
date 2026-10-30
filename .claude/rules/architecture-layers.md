@@ -12,7 +12,7 @@ GraphQL (types, mutations)          thin: parse input, authenticate, authorize, 
         |
 Application services                one use case each: business rules, transaction, returns a Result
         |
-Models + query objects + policies   data rules | read, filter, search | who may do what
+Models + query objects + policies   data rules | read, filter, search (query objects sit in services/<domain>/) | who may do what
         |
 PostgreSQL                          constraints are the last line of defence
 ```

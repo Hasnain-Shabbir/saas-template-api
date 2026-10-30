@@ -9,6 +9,7 @@ paths:
 
 ## Services
 - One class is one use case (`Accounts::Create`). One public method, `call`. It returns a `Result`: success with a value, or failure with a stable `code` and safe `message`.
+- A query object (`Domain::SearchQuery`) is the one exception to the `Result` rule: it only builds a filtered, ordered relation and returns it. It has no rules, no transaction, no side effects. A use case calls it.
 - Rescue only errors you can handle. **Never** `rescue StandardError` and return `e.message`. Unknown errors propagate to the error tracker.
 - A service owns the transaction. Side effects that can fail later (email, provider calls) go to a job **after** the commit.
 
