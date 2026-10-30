@@ -62,3 +62,6 @@ gem "sidekiq", "~> 8.1"
 
 # Audit log: who changed what (Layer 2 step 1).
 gem "paper_trail", "~> 17.0"
+
+# Runs a job on a schedule, for example the daily purge of old email logs (Layer 2 step 5).
+gem "sidekiq-cron", "~> 2.3"

@@ -32,6 +32,10 @@ module ValidationRules
 
   TERMS_VERSION_MAX_LENGTH = 20
 
+  # The email log stores a copy of each mail. A longer text is cut, never refused: the mail must still be sent.
+  EMAIL_LOG_SUBJECT_MAX_LENGTH = 255
+  EMAIL_LOG_BODY_MAX_LENGTH = 10_000
+
   # The key of an onboarding step: a short snake_case name, set in `Onboarding::Registry`.
   ONBOARDING_STEP_KEY_FORMAT = /\A[a-z][a-z0-9_]*\z/
   ONBOARDING_STEP_KEY_MAX_LENGTH = 50

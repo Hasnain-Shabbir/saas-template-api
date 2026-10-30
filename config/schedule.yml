@@ -1,0 +1,6 @@
+# Jobs that run on a schedule. Read by sidekiq-cron when `bundle exec sidekiq` starts (the web process ignores it).
+# Times are UTC. Add a job here, never in code.
+email_logs_purge:
+  cron: "17 3 * * *" # every day at 03:17
+  class: "EmailLogs::PurgeJob"
+  queue: default

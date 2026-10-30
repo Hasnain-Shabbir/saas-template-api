@@ -10,10 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_30_100001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "pg_trgm"
 
   create_table "allowlisted_jwts", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "jti", null: false
@@ -41,6 +42,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_090000) do
     t.check_constraint "char_length(request_id::text) <= 255", name: "audit_versions_request_id_length"
     t.check_constraint "char_length(whodunnit::text) <= 100", name: "audit_versions_whodunnit_length"
     t.check_constraint "event::text = ANY (ARRAY['create'::character varying, 'update'::character varying, 'destroy'::character varying]::text[])", name: "audit_versions_event_values"
+  end
+
+  create_table "email_logs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "recipient", null: false
+    t.string "mailer", null: false
+    t.string "action", null: false
+    t.string "subject"
+    t.text "body"
+    t.string "status", null: false
+    t.string "error_class"
+    t.datetime "sent_at"
+    t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_email_logs_on_created_at"
+    t.index ["mailer", "action", "created_at"], name: "index_email_logs_on_mailer_and_action_and_created_at"
+    t.index ["recipient"], name: "index_email_logs_on_recipient_trgm", opclass: :gin_trgm_ops, using: :gin
+    t.check_constraint "char_length(body) <= 10000", name: "email_logs_body_length"
+    t.check_constraint "char_length(recipient::text) <= 254", name: "email_logs_recipient_length"
+    t.check_constraint "char_length(subject::text) <= 255", name: "email_logs_subject_length"
+    t.check_constraint "status::text = ANY (ARRAY['sent'::character varying, 'failed'::character varying]::text[])", name: "email_logs_status_values"
   end
 
   create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
