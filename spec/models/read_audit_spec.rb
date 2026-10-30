@@ -31,6 +31,13 @@ RSpec.describe ReadAudit do
     expect { unknown.save!(validate: false) }.to raise_error(ActiveRecord::StatementInvalid)
   end
 
+  it "accepts every group in FIELD_GROUPS, in the model and in the database (a new group needs a migration)" do
+    described_class::FIELD_GROUPS.each do |group|
+      expect { described_class.create!(reader: "r", item_type: "User", item_id: subject_user.id, field_group: group) }.not_to raise_error
+    end
+    expect(described_class::FIELD_GROUPS).to include("email_body")
+  end
+
   it "needs a reader, a record, and a group" do
     expect(described_class.new).not_to be_valid
     expect { described_class.new(item_type: "User", item_id: subject_user.id, field_group: "contact").save!(validate: false) }

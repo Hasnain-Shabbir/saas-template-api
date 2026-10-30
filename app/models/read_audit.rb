@@ -6,7 +6,7 @@ class ReadAudit < ApplicationRecord
   RETENTION = 6.years
 
   # Add a group here and in a migration that changes the `read_audits_field_group_values` CHECK constraint.
-  FIELD_GROUPS = %w[date_of_birth contact address].freeze
+  FIELD_GROUPS = %w[date_of_birth contact address email_body].freeze
 
   validates :reader, :item_type, :item_id, presence: true
   validates :field_group, inclusion: { in: FIELD_GROUPS }
