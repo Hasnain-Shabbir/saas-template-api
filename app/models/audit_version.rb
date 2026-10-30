@@ -8,6 +8,9 @@ class AuditVersion < ApplicationRecord
 
   def readonly? = persisted? || super
 
+  # `delete` skips the readonly check in Rails, so refuse it here.
+  def delete = raise(ActiveRecord::ReadOnlyRecord, "#{self.class} is read-only")
+
   private
 
   # No actor set (console, runner, a test): say so, so a row never has an empty "who".

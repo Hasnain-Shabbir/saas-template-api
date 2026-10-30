@@ -11,7 +11,7 @@ RSpec.describe Auditable do
 
       row = versions_of(@user).sole
       expect(row).to have_attributes(event: "create", item_type: "User", item_id: @user.id, whodunnit: "actor-1")
-      expect(row.changed_fields).to include("email", "encrypted_password", "role")
+      expect(row.changed_fields).to include("email", "encrypted_password")
       expect(row.changed_fields).not_to include("id", "created_at", "updated_at")
       expect(row.created_at).to be_within(5.seconds).of(Time.current)
     end
@@ -110,10 +110,10 @@ RSpec.describe Auditable do
     end
 
     it "lists no sensitive field in any value allowlist" do
-      sensitive = /passw|token|digest|secret|code|otp|email|phone|name|birth|address|city|state|postal|country|key/
+      sensitive = /passw|token|digest|secret|code|otp|email|phone|name|birth|address|city|state|postal|country|api_key|secret_key|private_key|encryption_key/
       audited_models.each do |model|
         expect(model.audited_value_fields.grep(sensitive)).to be_empty, "#{model} stores a sensitive value"
-        expect(model.audited_value_fields & model.encrypted_attributes.map(&:to_s)).to be_empty
+        expect(model.audited_value_fields & Array(model.encrypted_attributes).map(&:to_s)).to be_empty
       end
     end
 

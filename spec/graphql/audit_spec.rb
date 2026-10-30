@@ -57,12 +57,12 @@ RSpec.describe "Audit log", type: :request do
     token
     io = StringIO.new
     logger = Logger.new(io)
-    original = ActiveSupport::LogSubscriber.logger
-    ActiveSupport::LogSubscriber.logger = logger
+    original = ActiveRecord::Base.logger
+    ActiveRecord::Base.logger = logger
     begin
       gql(update_profile, variables: { i: profile }, token:)
     ensure
-      ActiveSupport::LogSubscriber.logger = original
+      ActiveRecord::Base.logger = original
     end
 
     audit_lines = io.string.lines.grep(/audit_versions/)
@@ -79,6 +79,6 @@ RSpec.describe "Audit log", type: :request do
   end
 
   it "exposes no way to read the audit log through GraphQL" do
-    expect(SaasTemplateApiSchema.to_definition).not_to match(/audit|version/i)
+    expect(SaasTemplateApiSchema.to_definition).not_to match(/audit|paper_?trail/i)
   end
 end

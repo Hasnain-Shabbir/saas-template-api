@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_29_150001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_29_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -24,6 +24,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_29_150001) do
     t.datetime "updated_at", null: false
     t.index ["jti"], name: "index_allowlisted_jwts_on_jti", unique: true
     t.index ["user_id"], name: "index_allowlisted_jwts_on_user_id"
+  end
+
+  create_table "audit_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "item_type", null: false
+    t.uuid "item_id", null: false
+    t.string "event", null: false
+    t.string "whodunnit", null: false
+    t.string "changed_fields", default: [], null: false, array: true
+    t.jsonb "value_changes", default: {}, null: false
+    t.string "request_id"
+    t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_audit_versions_on_created_at"
+    t.index ["item_type", "item_id", "created_at"], name: "index_audit_versions_on_item_type_and_item_id_and_created_at"
+    t.index ["whodunnit"], name: "index_audit_versions_on_whodunnit"
+    t.check_constraint "char_length(request_id::text) <= 255", name: "audit_versions_request_id_length"
+    t.check_constraint "char_length(whodunnit::text) <= 100", name: "audit_versions_whodunnit_length"
+    t.check_constraint "event::text = ANY (ARRAY['create'::character varying, 'update'::character varying, 'destroy'::character varying]::text[])", name: "audit_versions_event_values"
   end
 
   create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
