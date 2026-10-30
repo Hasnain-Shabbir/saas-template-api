@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_29_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_30_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -83,6 +83,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_29_160000) do
     t.index ["user_id", "purpose"], name: "index_one_time_codes_on_user_id_and_purpose", unique: true
     t.check_constraint "attempts >= 0", name: "one_time_codes_attempts_check"
     t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying, 'email_change'::character varying]::text[])", name: "one_time_codes_purpose_check"
+  end
+
+  create_table "read_audits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "reader", null: false
+    t.string "item_type", null: false
+    t.uuid "item_id", null: false
+    t.string "field_group", null: false
+    t.string "request_id"
+    t.datetime "created_at", null: false
+    t.index ["created_at"], name: "index_read_audits_on_created_at"
+    t.index ["item_type", "item_id", "created_at"], name: "index_read_audits_on_item_type_and_item_id_and_created_at"
+    t.index ["reader", "created_at"], name: "index_read_audits_on_reader_and_created_at"
+    t.check_constraint "char_length(reader::text) <= 100", name: "read_audits_reader_length"
+    t.check_constraint "char_length(request_id::text) <= 255", name: "read_audits_request_id_length"
+    t.check_constraint "field_group::text = ANY (ARRAY['date_of_birth'::character varying, 'contact'::character varying, 'address'::character varying]::text[])", name: "read_audits_field_group_values"
   end
 
   create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

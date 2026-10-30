@@ -22,7 +22,8 @@ class GraphqlController < ApplicationController
 
     context = {
       current_user: user,
-      token: bearer_token
+      token: bearer_token,
+      request_id: request.request_id # stored next to a read audit row
     }
     result = SaasTemplateApiSchema.execute(query, variables:, context: context, operation_name: operation_name)
     render json: GraphqlErrorNormalizer.call(result.to_h)
