@@ -144,7 +144,7 @@ RSpec.describe "Auth operations", type: :request do
 
     it "answers UNAUTHENTICATED for an expired token" do
       token = token_for(user)
-      travel 2.hours
+      travel 8.days
 
       expect(unauthenticated?(gql(me, token:))).to be(true)
     end

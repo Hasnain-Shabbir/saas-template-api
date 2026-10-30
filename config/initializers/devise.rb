@@ -313,7 +313,7 @@ Devise.setup do |config|
   # so it comes from credentials or the environment, never from code.
   config.jwt do |jwt|
     jwt.secret = Rails.application.key_generator.generate_key("devise-jwt").unpack1("H*")
-    jwt.expiration_time = 1.hour.to_i
+    jwt.expiration_time = 7.days.to_i
 
     # Tokens are issued and revoked in services (Auth::IssueToken, Auth::Logout) and returned
     # in the GraphQL response body, not in a header.
