@@ -192,9 +192,9 @@ RSpec.describe "Authorization", type: :request do
     end
   end
 
-  # Default deny: every operation is public (and throttled) or has a permission test above.
+  # Default deny: every operation is public (and throttled) or has a permission test above (emailLogs and emailLog: spec/graphql/email_logs_spec.rb).
   describe "coverage" do
-    let(:covered) { %w[me logout requestEmailChange confirmEmailChange inviteUser revokeInvitation resendInvitation updateProfile updateAddress acceptTerms] }
+    let(:covered) { %w[me emailLogs emailLog logout requestEmailChange confirmEmailChange inviteUser revokeInvitation resendInvitation updateProfile updateAddress acceptTerms] }
 
     it "lists exactly the logged-in operations that have a permission test" do
       mutations = Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }

@@ -10,6 +10,7 @@ module Errors
   INVALID_CREDENTIALS = Error.new(code: "INVALID_CREDENTIALS", message: "Invalid email or password")
   INVALID_CODE = Error.new(code: "INVALID_CODE", message: "This code is invalid or has expired")
   INVALID_INVITATION = Error.new(code: "INVALID_INVITATION", message: "This invitation is invalid or has expired")
+  NOT_FOUND = Error.new(code: "NOT_FOUND", message: "Not found")
   ONBOARDING_REQUIRED = Error.new(code: "ONBOARDING_REQUIRED", message: "Complete your onboarding to continue")
   DATE_OF_BIRTH_IN_FUTURE = Error.new(code: "VALIDATION_FAILED", message: "cannot be in the future")
   DATE_OF_BIRTH_TOO_OLD = Error.new(code: "VALIDATION_FAILED", message: "is too far in the past. Check the year")

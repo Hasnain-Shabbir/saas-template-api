@@ -9,7 +9,7 @@ module EmailLogs
       scope = scope.where(created_at: ..to.end_of_day) if to.present?
       scope = scope.where(status: status.to_s) if status.present?
       scope = scope.recipient_matching(search) if search.present?
-      scope.order(created_at: :desc)
+      scope.order(created_at: :desc, id: :desc) # the id keeps the order stable between pages
     end
   end
 end

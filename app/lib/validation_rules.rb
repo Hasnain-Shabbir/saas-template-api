@@ -36,6 +36,10 @@ module ValidationRules
   EMAIL_LOG_SUBJECT_MAX_LENGTH = 255
   EMAIL_LOG_BODY_MAX_LENGTH = 10_000
 
+  # Lists the API returns in pages: the size when the client gives none, and the most it may ask for (a larger value is lowered).
+  PAGE_SIZE_DEFAULT = 20
+  PAGE_SIZE_MAX = 50
+
   # The key of an onboarding step: a short snake_case name, set in `Onboarding::Registry`.
   ONBOARDING_STEP_KEY_FORMAT = /\A[a-z][a-z0-9_]*\z/
   ONBOARDING_STEP_KEY_MAX_LENGTH = 50

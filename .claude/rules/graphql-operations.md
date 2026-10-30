@@ -18,5 +18,13 @@ paths:
 - N+1: use the dataloader (or `includes` in a query object). The N+1 test must keep passing.
 - Limits live in `saas_template_api_schema.rb`: `max_depth`, `max_complexity`, `max_query_string_tokens`, introspection off in production. Do not raise a limit to make one query pass without asking.
 - Every list field of objects carries `complexity: Types::BaseField::LIST_COMPLEXITY`. A test fails if one does not.
+
+## Lists: one shape everywhere
+- **A short list the server builds** (`errors`, `steps`) is a flat array, named by the plural noun of what it holds. No wrapper.
+- **A list of rows from a table** returns a page object, never a bare array. The type is `<Thing>Page` (`EmailLogPage`) with exactly these fields: `items` (the rows, `[Thing!]!`, with `LIST_COMPLEXITY`), `page`, `perPage`, `totalCount`, `totalPages`. The query field is the plural noun (`emailLogs`) and takes the arguments `page` and `perPage` next to its filters.
+- Never name the rows field `nodes`, `edges`, `data`, `results`, or `itemsList`. `nodes` and `edges` mean a Relay connection, which this API does not use. `data` clashes with the top-level `data` key of every response.
+- Page size: `ValidationRules::PAGE_SIZE_DEFAULT` and `PAGE_SIZE_MAX`. A value out of range is brought into range, never an error. Order is newest first with the id as a tie breaker, so pages never overlap. A service builds the page (`EmailLogs::List`), the query field only authorizes and calls it.
+- A cursor connection (`<thing>Connection` with `edges`, `pageInfo`) is a new shape: add it as a separate field, and only after the owner agrees (for example when a table is too big for offset paging).
+- `spec/graphql/list_shape_spec.rb` fails when a page type has other fields or a field uses a banned name. Add a new page type to the shape, not an exception to the spec.
 - Field-level hiding (for example an email hidden from some roles) lives in the type and has a test.
 
