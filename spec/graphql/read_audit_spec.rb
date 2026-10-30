@@ -9,7 +9,7 @@ RSpec.describe "Read audit log", type: :request do
         description "Test only"
 
         field :user, Types::UserType, null: true, description: "Test only" do
-          argument :id, ID, required: true, description: "Test only"
+          argument :id, GraphQL::Types::ID, required: true, description: "Test only"
         end
         field :users, [ Types::UserType ], null: false, description: "Test only"
 
@@ -42,7 +42,8 @@ RSpec.describe "Read audit log", type: :request do
     other = create(:user, :with_profile)
     run("{ users { phone } }")
 
-    expect(ReadAudit.pluck(:item_id)).to contain_exactly(viewed.id, other.id, admin.id)
+    # The admin is in the list too, but reading their own row is not logged.
+    expect(ReadAudit.pluck(:item_id)).to contain_exactly(viewed.id, other.id)
   end
 
   it "does not log a field that is not sensitive" do
