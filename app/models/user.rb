@@ -59,6 +59,13 @@ class User < ApplicationRecord
   # The count is reset on purpose instead: `unlock_access!` in Login, RequestEmailChange, and ResetPassword.
   def reset_failed_attempts! = nil
 
+  # Partial, case-insensitive search by email, first name or last name ("ada", "lace"). The `%` and `_` the caller typed are matched literally.
+  # The three `lower(...)` expressions match the trigram indexes of the migration `AddUsersSearchTrigramIndexes`.
+  scope :matching, lambda { |part|
+    pattern = "%#{sanitize_sql_like(part.to_s.strip.downcase)}%"
+    where("lower(email::text) LIKE :pattern OR lower(first_name) LIKE :pattern OR lower(last_name) LIKE :pattern", pattern:)
+  }
+
   def profile_complete? = PROFILE_FIELDS.all? { |field| self[field].present? }
 
   # True when the user accepted the version of the terms that is current now.

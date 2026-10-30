@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -41,7 +41,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.index ["whodunnit"], name: "index_audit_versions_on_whodunnit"
     t.check_constraint "char_length(request_id::text) <= 255", name: "audit_versions_request_id_length"
     t.check_constraint "char_length(whodunnit::text) <= 100", name: "audit_versions_whodunnit_length"
-    t.check_constraint "event::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text, 'destroy'::character varying::text])", name: "audit_versions_event_values"
+    t.check_constraint "event::text = ANY (ARRAY['create'::character varying, 'update'::character varying, 'destroy'::character varying]::text[])", name: "audit_versions_event_values"
   end
 
   create_table "email_logs", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -60,7 +60,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.check_constraint "char_length(body) <= 10000", name: "email_logs_body_length"
     t.check_constraint "char_length(recipient::text) <= 254", name: "email_logs_recipient_length"
     t.check_constraint "char_length(subject::text) <= 255", name: "email_logs_subject_length"
-    t.check_constraint "status::text = ANY (ARRAY['sent'::character varying::text, 'failed'::character varying::text])", name: "email_logs_status_values"
+    t.check_constraint "status::text = ANY (ARRAY['sent'::character varying, 'failed'::character varying]::text[])", name: "email_logs_status_values"
   end
 
   create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -79,7 +79,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.index ["token_digest"], name: "index_invitations_on_token_digest", unique: true
     t.check_constraint "accepted_at IS NULL OR revoked_at IS NULL", name: "invitations_accepted_or_revoked"
     t.check_constraint "char_length(email::text) <= 254", name: "invitations_email_length"
-    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying::text, 'member'::character varying::text])", name: "invitations_role_values"
+    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying, 'member'::character varying]::text[])", name: "invitations_role_values"
   end
 
   create_table "onboarding_steps", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -102,7 +102,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.datetime "updated_at", null: false
     t.index ["user_id", "purpose"], name: "index_one_time_codes_on_user_id_and_purpose", unique: true
     t.check_constraint "attempts >= 0", name: "one_time_codes_attempts_check"
-    t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying::text, 'email_change'::character varying::text])", name: "one_time_codes_purpose_check"
+    t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying, 'email_change'::character varying]::text[])", name: "one_time_codes_purpose_check"
   end
 
   create_table "read_audits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -142,6 +142,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.string "country"
     t.string "terms_version"
     t.datetime "terms_accepted_at"
+    t.index "lower((email)::text) gin_trgm_ops", name: "index_users_on_email_trgm", using: :gin
+    t.index "lower((first_name)::text) gin_trgm_ops", name: "index_users_on_first_name_trgm", using: :gin
+    t.index "lower((last_name)::text) gin_trgm_ops", name: "index_users_on_last_name_trgm", using: :gin
     t.index ["email"], name: "index_users_on_email", unique: true
     t.check_constraint "address_line_1 IS NULL OR char_length(address_line_1::text) >= 1 AND char_length(address_line_1::text) <= 100", name: "users_address_line_1_length"
     t.check_constraint "address_line_2 IS NULL OR char_length(address_line_2::text) >= 1 AND char_length(address_line_2::text) <= 100", name: "users_address_line_2_length"
@@ -153,7 +156,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_110001) do
     t.check_constraint "first_name IS NULL OR char_length(first_name::text) >= 1 AND char_length(first_name::text) <= 100", name: "users_first_name_length"
     t.check_constraint "last_name IS NULL OR char_length(last_name::text) >= 1 AND char_length(last_name::text) <= 100", name: "users_last_name_length"
     t.check_constraint "postal_code IS NULL OR char_length(postal_code::text) >= 1 AND char_length(postal_code::text) <= 10", name: "users_postal_code_length"
-    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying::text, 'member'::character varying::text])", name: "users_role_values"
+    t.check_constraint "role::text = ANY (ARRAY['super_admin'::character varying, 'member'::character varying]::text[])", name: "users_role_values"
     t.check_constraint "state IS NULL OR char_length(state::text) = 2", name: "users_state_length"
     t.check_constraint "terms_version IS NULL OR char_length(terms_version::text) >= 1 AND char_length(terms_version::text) <= 20", name: "users_terms_version_length"
   end
