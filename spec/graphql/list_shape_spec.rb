@@ -6,7 +6,7 @@ RSpec.describe "List shape" do
   let(:page_types) { object_types.select { |type| type.graphql_name.end_with?("Page") } }
 
   it "has at least one page type" do
-    expect(page_types.map(&:graphql_name)).to include("EmailLogPage")
+    expect(page_types.map(&:graphql_name)).to include("EmailLogPage", "UserPage")
   end
 
   it "gives every page type exactly items, page, perPage, totalCount and totalPages" do
