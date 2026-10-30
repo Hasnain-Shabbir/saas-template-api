@@ -11,7 +11,8 @@ HERE=".claude/skills/api-attack-test/scripts"
 DB=$(RAILS_ENV=test bin/rails runner 'print ActiveRecord::Base.connection.current_database' 2>/dev/null | tail -1)
 case "$DB" in *_test) ;; *) echo "Refusing to run: database '$DB' is not a test database"; exit 1;; esac
 
-truncate_db() { RAILS_ENV=test bin/rails runner 'ActiveRecord::Base.connection.execute("TRUNCATE users CASCADE")' >/dev/null 2>&1; }
+# The audit, read audit and email log tables have no foreign key to users, so `users CASCADE` alone leaves their rows behind (and specs that expect an empty table then fail).
+truncate_db() { RAILS_ENV=test bin/rails runner 'ActiveRecord::Base.connection.execute("TRUNCATE users, audit_versions, read_audits, email_logs CASCADE")' >/dev/null 2>&1; }
 cleanup() { [ -f "$OUT/t.pid" ] && kill "$(cat "$OUT/t.pid")" 2>/dev/null; [ -f "$OUT/p.pid" ] && kill "$(cat "$OUT/p.pid")" 2>/dev/null; sleep 1; truncate_db; }
 trap cleanup EXIT
 
