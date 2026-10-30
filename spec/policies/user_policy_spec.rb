@@ -17,7 +17,11 @@ RSpec.describe UserPolicy do
         end
       end
 
-      %i[index? create? update? destroy?].each do |action|
+      it "allows index? (the admin list) only for a super_admin" do
+        expect(described_class.new(user, User).index?).to be(role == "super_admin")
+      end
+
+      %i[create? update? destroy?].each do |action|
         it "denies #{action} (nothing allows it yet)" do
           expect(described_class.new(user, user).public_send(action)).to be(false)
         end
