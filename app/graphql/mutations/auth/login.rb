@@ -1,15 +1,14 @@
 module Mutations
   module Auth
     class Login < BaseMutation
-      description "Checks the email and password and returns a token for a new session."
+      description "Checks the email and password and emails a login code. Send the code to `verifyLoginCode` to get a token."
 
       null true
 
       argument :email, String, required: true, description: "Email of the account"
       argument :password, String, required: true, description: "Password of the account"
 
-      field :token, String, description: "Token to send as `Authorization: Bearer <token>` on later requests"
-      field :user, Types::UserType, description: "The user the token belongs to"
+      field :success, Boolean, null: false, description: "True when the password was right and a login code was sent to the email of the account"
       field :errors, [ Types::UserErrorType ], null: false, description: "Expected failures. Empty when the operation succeeded"
 
       # Public operation: nobody is logged in yet.
@@ -19,9 +18,8 @@ module Mutations
 
       def resolve(email:, password:)
         result = ::Auth::Login.call(email:, password:)
-        value = result.value || {}
 
-        { token: value[:token], user: value[:user], errors: errors_from(result) }
+        { success: result.success?, errors: errors_from(result) }
       end
     end
   end

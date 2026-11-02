@@ -7,7 +7,7 @@ module Types
     field :role, Types::UserRoleEnum, null: false, description: "The role of the user, for example to show or hide screens. The API still checks every request"
 
     # Personal data. Reading date_of_birth, phone, or address as someone else is logged (`sensitive:`, see `ReadAudit`).
-    # A user is only ever returned to themselves today (me, login, signUp, acceptInvitation). An operation that returns
+    # A user is only ever returned to themselves today (me, verifyLoginCode, signUp, acceptInvitation). An operation that returns
     # another user must hide `date_of_birth` and `phone` through a policy first, with a test.
     field :first_name, String, null: true, description: "First name. Empty until the profile is saved"
     field :last_name, String, null: true, description: "Last name. Empty until the profile is saved"

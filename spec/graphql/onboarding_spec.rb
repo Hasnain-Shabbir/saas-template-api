@@ -145,9 +145,9 @@ RSpec.describe "Onboarding", type: :request do
 
       it "does not stop a public operation" do
         create(:user, email: "someone@example.test", password: "correct horse battery")
-        body = gql("mutation($i: LoginInput!) { login(input: $i) { token errors { code } } }", variables: { i: { email: "someone@example.test", password: "correct horse battery" } })
+        body = request_login_code(email: "someone@example.test", password: "correct horse battery")
 
-        expect(body.dig("data", "login", "token")).to be_present
+        expect(body.dig("data", "login", "success")).to be(true)
       end
     end
   end

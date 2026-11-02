@@ -34,12 +34,11 @@ RSpec.describe "Authorization", type: :request do
       expect(body.dig("data", "signUp", "user", "role")).to eq("MEMBER")
     end
 
-    it "comes back from login" do
+    it "comes back from verifyLoginCode" do
       create(:user, :super_admin, email: "root@example.test", password: "correct horse battery")
-      body = gql("mutation($i: LoginInput!) { login(input: $i) { user { role } } }",
-                 variables: { i: { email: "root@example.test", password: "correct horse battery" } })
+      body = log_in(email: "root@example.test", password: "correct horse battery")
 
-      expect(body.dig("data", "login", "user", "role")).to eq("SUPER_ADMIN")
+      expect(body.dig("data", "verifyLoginCode", "user", "role")).to eq("SUPER_ADMIN")
     end
 
     it "has one enum value per role in User.roles" do

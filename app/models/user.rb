@@ -56,7 +56,7 @@ class User < ApplicationRecord
 
   # Devise calls this from a Warden hook on every authenticated request (a JWT request too). That would zero the count of
   # wrong passwords typed into a logged-in operation (requestEmailChange), so a stolen token could guess without a lock.
-  # The count is reset on purpose instead: `unlock_access!` in Login, RequestEmailChange, and ResetPassword.
+  # The count is reset on purpose instead: `unlock_access!` in VerifyLogin, RequestEmailChange, and ResetPassword.
   def reset_failed_attempts! = nil
 
   # Partial, case-insensitive search by email, first name or last name ("ada", "lace"). The `%` and `_` the caller typed are matched literally.

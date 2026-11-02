@@ -57,7 +57,7 @@ RSpec.describe "Malformed GraphQL requests", type: :request do
 
   it "answers 400 for a NUL byte in any string (PostgreSQL cannot store it)" do
     [ "a\u0000b@example.test", "pass\u0000word long" ].each do |value|
-      expect { post_json({ query: "mutation($i: LoginInput!) { login(input: $i) { token } }", variables: { i: { email: value, password: value } } }.to_json) }
+      expect { post_json({ query: "mutation($i: LoginInput!) { login(input: $i) { success } }", variables: { i: { email: value, password: value } } }.to_json) }
         .not_to raise_error
 
       expect_bad_request
@@ -65,7 +65,7 @@ RSpec.describe "Malformed GraphQL requests", type: :request do
   end
 
   it "answers 400 for a NUL byte written inside the query text" do
-    post_json({ query: "mutation { login(input: { email: \"a\\u0000b\", password: \"x\" }) { token } }" }.to_json)
+    post_json({ query: "mutation { login(input: { email: \"a\\u0000b\", password: \"x\" }) { success } }" }.to_json)
 
     expect_bad_request
   end

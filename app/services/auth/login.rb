@@ -1,13 +1,16 @@
 module Auth
   class Login
+    # Step 1 of a login: checks the password and, when it is right, queues an email with a code. No token yet: VerifyLogin gives it
+    # for the code. Unknown email, wrong password, and locked account all give the same failure and run bcrypt once.
     def self.call(email:, password:)
       user = User.find_for_database_authentication(email: email)
       # Always run bcrypt, so a locked or unknown account takes as long as a real check.
       password_ok = user ? user.valid_password?(password) : dummy_check(password)
 
       if user&.valid_for_authentication? { password_ok } && user.active_for_authentication?
-        user.unlock_access! if user.failed_attempts.positive? # Devise resets this in a Warden hook, which we do not use
-        Result.success(user:, token: IssueToken.call(user))
+        # The job gets the id only: the code is made inside it. The failed attempts stay counted until a code is verified.
+        SendLoginCodeJob.perform_later(user.id)
+        Result.success
       else
         Errors.failure(Errors::INVALID_CREDENTIALS)
       end

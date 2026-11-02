@@ -3,7 +3,7 @@ require "rails_helper"
 RSpec.describe "Rate limiting and request guards", type: :request do
   include ActiveSupport::Testing::TimeHelpers
 
-  let(:login) { "mutation($input: LoginInput!) { login(input: $input) { token errors { code } } }" }
+  let(:login) { "mutation($input: LoginInput!) { login(input: $input) { success errors { code } } }" }
   let(:sign_up) { "mutation($input: SignUpInput!) { signUp(input: $input) { token errors { code } } }" }
   let(:wrong_login) { { input: { email: "nobody@example.test", password: "wrong password 1" } } }
 
@@ -155,14 +155,14 @@ RSpec.describe "Rate limiting and request guards", type: :request do
 
   describe "batching" do
     it "blocks several public operations in one request (aliases)" do
-      gql("mutation { a: login(input: { email: \"a@example.test\", password: \"x\" }) { token } b: login(input: { email: \"a@example.test\", password: \"y\" }) { token } }")
+      gql("mutation { a: login(input: { email: \"a@example.test\", password: \"x\" }) { success } b: login(input: { email: \"a@example.test\", password: \"y\" }) { success } }")
 
       expect_error(:bad_request, :BAD_REQUEST)
     end
 
     it "blocks them when hidden behind a fragment" do
       gql(<<~GQL)
-        fragment F on Mutation { login(input: { email: "a@example.test", password: "x" }) { token } }
+        fragment F on Mutation { login(input: { email: "a@example.test", password: "x" }) { success } }
         mutation { ...F signUp(input: { email: "a@example.test", password: "y" }) { token } }
       GQL
 

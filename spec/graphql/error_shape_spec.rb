@@ -2,7 +2,7 @@ require "rails_helper"
 
 # Every top-level error reaches the client as { message, path, extensions: { code } }.
 RSpec.describe "GraphQL error shape", type: :request do
-  let(:login) { "mutation Login($input: LoginInput!) { login(input: $input) { token } }" }
+  let(:login) { "mutation Login($input: LoginInput!) { login(input: $input) { success } }" }
 
   it "answers a missing variable with VALIDATION_FAILED per field and no sent value" do
     body = gql(login, variables: { input: { email: nil, password: nil } })

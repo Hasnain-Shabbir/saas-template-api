@@ -21,13 +21,6 @@ RSpec.describe "Password reset", type: :request do
       }
     GQL
   end
-  let(:login) do
-    <<~GQL
-      mutation($input: LoginInput!) {
-        login(input: $input) { token errors { message path code } }
-      }
-    GQL
-  end
   let(:me) { "{ me { id email } }" }
 
   before { ActionMailer::Base.deliveries.clear }
@@ -50,7 +43,7 @@ RSpec.describe "Password reset", type: :request do
   end
 
   def login_with(password)
-    gql(login, variables: { input: { email: "person@example.test", password: } }).dig("data", "login", "token")
+    log_in(email: "person@example.test", password:).dig("data", "verifyLoginCode", "token")
   end
 
   def invalid_code?(body)

@@ -1,6 +1,6 @@
 class Rack::Attack
   # Mutations an anonymous caller can reach (the ones that override `ready?`). A spec fails if this list drifts.
-  PUBLIC_OPERATIONS = %w[login signUp requestPasswordReset resetPassword acceptInvitation].freeze
+  PUBLIC_OPERATIONS = %w[login verifyLoginCode signUp requestPasswordReset resetPassword acceptInvitation].freeze
   # Logged-in mutations that check a password or guess a code. Limited like public ones (per IP: the middleware runs before Warden,
   # and a token is never decoded without verification). A spec fails if one is missing.
   EMAIL_CHANGE_OPERATIONS = %w[requestEmailChange confirmEmailChange].freeze
