@@ -49,7 +49,8 @@ def clean?(r) = r[:status] < 500 && r[:status] != 0 && !r[:body].include?("INTER
 def code(r) = r[:json]&.dig("errors", 0, "extensions", "code")
 
 SIGNUP = "mutation S($i: SignUpInput!){ signUp(input:$i){ token user{id email} errors{message path code} } }"
-LOGIN  = "mutation L($i: LoginInput!){ login(input:$i){ token user{id email} errors{message path code} } }"
+LOGIN  = "mutation L($i: LoginInput!){ login(input:$i){ success errors{message path code} } }"
+VERIFY_LOGIN = "mutation V($i: VerifyLoginCodeInput!){ verifyLoginCode(input:$i){ token user{id email} errors{message path code} } }"
 LOGOUT = "mutation { logout(input:{}){ success errors{message path code} } }"
 ME     = "{ me { id email } }"
 PW = "Str0ng-Passw0rd!"
@@ -90,7 +91,26 @@ def signup(email, pw = PW, onboard: true)
   onboard!(tok_of(r)) if onboard
   r
 end
-def login(email, pw = PW) = gql(LOGIN, variables: { i: { email: email, password: pw } })
+ROOT = File.expand_path("../../../..", __dir__)
+OTP_HELPER = File.join(__dir__, "otp_helper.rb")
+def otp(action, email, *rest) = IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", OTP_HELPER, action, email, *rest ], chdir: ROOT, err: File::NULL, &:read).to_s.strip
+
+# The login has two steps: `login` checks the password and emails a code, `verifyLoginCode` trades the code for a token.
+def login_step1(email, pw = PW) = gql(LOGIN, variables: { i: { email: email, password: pw } })
+def verify_login(email, code) = gql(VERIFY_LOGIN, variables: { i: { email: email, code: code } })
+
+# Both steps, answered like the old one-step login (`data.login` has `token`, `user`, `errors`), so most checks read the same.
+# The script cannot read the email. In test mode a helper issues the code straight into the test database (the "inbox").
+# Prod mode has another secret key, so its digests do not match: there the answer is the one of step 1 (success, no token).
+def login(email, pw = PW)
+  first = login_step1(email, pw)
+  return first unless LABEL == "test" && first[:json]&.dig("data", "login", "success") == true
+
+  second = verify_login(email, otp("login_mint", email))
+  second.merge(json: { "data" => { "login" => second[:json]&.dig("data", "verifyLoginCode") } })
+end
+# True when the password was accepted: a token (test mode, both steps) or success (prod mode, step 1).
+def login_ok?(r) = !tok_of(r, "login").nil? || r[:json]&.dig("data", "login", "success") == true
 def tok_of(r, op = "signUp") = r[:json]&.dig("data", op, "token")
 def errs_of(r, op = "signUp") = r[:json]&.dig("data", op, "errors")
 
@@ -106,8 +126,8 @@ check("A4", "duplicate signUp rejected", errs_of(signup(email))&.any?)
 check("A5", "duplicate signUp, UPPERCASE email", errs_of(signup(email.upcase))&.any?)
 check("A6", "duplicate signUp, surrounding spaces", errs_of(signup("  #{email}  "))&.any?)
 r = login(email.upcase)
-check("A7", "login is case-insensitive on email", tok_of(r, "login"))
-tok2 = tok_of(r, "login")
+check("A7", "login is case-insensitive on email", login_ok?(r))
+tok2 = tok_of(r, "login") || tok_of(signup(uniq)) # prod mode cannot finish step 2, so the logout checks use a token from signUp
 wrong = login(email, "wrong-password-x")
 check("A8", "wrong password -> INVALID_CREDENTIALS", wrong[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", wrong[:body])
 check("A9", "unknown email answers identically (no enumeration)", login(uniq, "wrong-password-x")[:json]&.dig("data", "login", "errors") == wrong[:json]&.dig("data", "login", "errors"))
@@ -121,7 +141,7 @@ check("A12", "password under the minimum rejected", errs_of(signup(uniq, "123456
 check("A13", "multibyte password over 72 BYTES rejected", errs_of(signup(uniq, "🔥" * 19))&.any?)
 mb = uniq
 signup(mb, "pässwörd-日本語-🔥")
-check("A14", "unicode password signUp+login works", tok_of(login(mb, "pässwörd-日本語-🔥"), "login"))
+check("A14", "unicode password signUp+login works", login_ok?(login(mb, "pässwörd-日本語-🔥")))
 
 check("A15", "logout succeeds", gql(LOGOUT, token: tok2)[:json]&.dig("data", "logout", "success"))
 check("A16", "token after logout is rejected (replay)", code(gql(ME, token: tok2)) == "UNAUTHENTICATED")
@@ -153,11 +173,11 @@ bad_emails = [ "' OR '1'='1", "admin@example.test' --", "a@b.c'; DROP TABLE user
               "<script>alert(1)</script>@x.test", "${7*7}@x.test", "{{7*7}}@x.test", "‮@x.test", "a@b", "name​@example.test", "nаme@example.test" ]
 bad_emails.each_with_index do |s, i|
   r = login(s, "whatever-password")
-  check("C1.#{i}", "login email payload #{s[0, 25].inspect}", clean?(r) && !tok_of(r, "login"), r[:body])
+  check("C1.#{i}", "login email payload #{s[0, 25].inspect}", clean?(r) && !login_ok?(r), r[:body])
   r = signup(s)
   check("C2.#{i}", "signUp refuses email payload #{s[0, 25].inspect}", clean?(r) && !tok_of(r), r[:body], bad: "WEAK")
 end
-check("C3", "SQLi in password", !tok_of(login(email, "' OR '1'='1"), "login"), bad: "CRITICAL")
+check("C3", "SQLi in password", !login_ok?(login(email, "' OR '1'='1")), bad: "CRITICAL")
 check("C5", "plus alias accepted (info)", true) # normal behaviour
 r = signup("#{'a' * 300}@example.test")
 check("C6", "300-char email rejected cleanly", clean?(r) && errs_of(r)&.any?, r[:body])
@@ -214,7 +234,7 @@ end
 check("D3", "no 'Did you mean' suggestions in production", LABEL != "prod" || !gql("{ meee }", token: tok)[:body].include?("Did you mean") && !gql("{ me { emai } }", token: tok)[:body].include?("Did you mean"))
 check("D4", "fragment cycle", clean?(gql("fragment A on Query { ...B } fragment B on Query { ...A } { ...A }")))
 check("D5", "20k fields (token limit)", clean?(gql("query { " + "__typename " * 20_000 + "}")))
-aliases = (1..200).map { |i| "a#{i}: login(input:{email:\"#{email}\", password:\"guess#{i}\"}){ token }" }.join(" ")
+aliases = (1..200).map { |i| "a#{i}: login(input:{email:\"#{email}\", password:\"guess#{i}\"}){ success }" }.join(" ")
 r = gql("mutation { #{aliases} }")
 check("D6", "200 aliased logins in ONE request are refused", r[:status] == 400 || r[:status] == 200 && !r[:json]&.dig("data"), "status=#{r[:status]} #{r[:ms]}ms #{r[:body][0, 100]}")
 check("D7", "5k repeated directives", clean?(gql("query { __typename " + "@skip(if:false) " * 5000 + "}")))
@@ -234,10 +254,10 @@ check("D19", "empty body", http(raw: "")[:status] == 400)
 check("D20", "form-encoded body refused", http(raw: "query=#{ME}", ctype: "application/x-www-form-urlencoded")[:status] == 400)
 check("D21", "text/plain body refused", http(raw: "query=#{ME}", ctype: "text/plain")[:status] == 400)
 check("D22", "GET /graphql not served", http(method: :get, path: "/graphql?query=#{URI.encode_www_form_component(ME)}")[:status] == 404)
-check("D23", "missing required arg", code(gql("mutation { login(input:{email:\"a@b.c\"}){ token } }")) == "BAD_REQUEST")
-r = gql("mutation L($i: LoginInput!){ login(input:$i){ token } }", variables: { i: { email: 123, password: [ "x" ] } })
+check("D23", "missing required arg", code(gql("mutation { login(input:{email:\"a@b.c\"}){ success } }")) == "BAD_REQUEST")
+r = gql("mutation L($i: LoginInput!){ login(input:$i){ success } }", variables: { i: { email: 123, password: [ "x" ] } })
 check("D24", "wrong variable types -> VALIDATION_FAILED", code(r) == "VALIDATION_FAILED", r[:body])
-check("D25", "null literals for required args", clean?(gql("mutation { login(input:{email:null,password:null}){ token } }")))
+check("D25", "null literals for required args", clean?(gql("mutation { login(input:{email:null,password:null}){ success } }")))
 
 # ---------- E. Timing ----------
 def avg(n) = (1..n).map { yield }.sum / n.to_f
@@ -272,10 +292,10 @@ ce = uniq
 res = 12.times.map { Thread.new { signup(ce) } }.map(&:value)
 check("G1", "12 parallel signUps, same email -> exactly 1 account", res.count { |x| tok_of(x) } == 1 && res.all? { |x| clean?(x) }, res.map { |x| x[:status] }.tally.inspect)
 le = signup(uniq)[:json]["data"]["signUp"]["user"]["email"]
-res = 8.times.map { Thread.new { login(le) } }.map(&:value)
-toks = res.map { |x| tok_of(x, "login") }
-check("G2", "8 parallel logins all succeed with distinct tokens", toks.all? && toks.uniq.size == toks.size)
-rr = 5.times.map { Thread.new { gql(LOGOUT, token: toks.first) } }.map(&:value)
+res = 8.times.map { Thread.new { login_step1(le) } }.map(&:value)
+check("G2", "8 parallel password checks (step 1) all answer success, no 500, no token", res.all? { |x| clean?(x) && login_ok?(x) && !x[:body].include?("token") }, res.map { |x| x[:status] }.tally.inspect)
+g_tok = tok_of(signup(uniq))
+rr = 5.times.map { Thread.new { gql(LOGOUT, token: g_tok) } }.map(&:value)
 check("G3", "parallel logout of one token has no 500", rr.all? { |x| clean?(x) })
 
 # ---------- H. Rate limits and lockout ----------
@@ -304,15 +324,12 @@ end
 # Prod mode has a different secret key, so only the black-box checks (I1 to I9) run there.
 REQ_RESET = "mutation R($i: RequestPasswordResetInput!){ requestPasswordReset(input:$i){ success errors{message path code} } }"
 DO_RESET  = "mutation D($i: ResetPasswordInput!){ resetPassword(input:$i){ success errors{message path code} } }"
-ROOT = File.expand_path("../../../..", __dir__)
-OTP_HELPER = File.join(__dir__, "otp_helper.rb")
 NEW_PW = "New-Passw0rd-9!"
 
 def req_reset(email, extra = {}) = gql(REQ_RESET, variables: { i: { email: email }.merge(extra) })
 def do_reset(email, otp_code, pw = NEW_PW) = gql(DO_RESET, variables: { i: { email: email, code: otp_code, password: pw } })
 def reset_ok?(r) = r[:json]&.dig("data", "resetPassword", "success") == true
 def reset_code(r) = r[:json]&.dig("data", "resetPassword", "errors", 0, "code")
-def otp(action, email, *rest) = IO.popen({ "RAILS_ENV" => "test" }, [ "bin/rails", "runner", OTP_HELPER, action, email, *rest ], chdir: ROOT, err: File::NULL, &:read).to_s.strip
 def wrong_guess(real) = real == "000000" ? "111111" : "000000"
 
 rv = uniq
@@ -426,7 +443,7 @@ jt = tok_of(signup(uniq))
 # J1: array-based batching. One HTTP request carrying many operations would get around every per-request limit
 # (the throttle, the 5-guesses-per-code limit). Must be refused as a whole.
 ops = ->(n, q) { Array.new(n) { { query: q } } }
-{ "J1.0" => ops.(20, "mutation { login(input:{email:\"#{email}\", password:\"guess\"}){ token } }"),
+{ "J1.0" => ops.(20, "mutation { login(input:{email:\"#{email}\", password:\"guess\"}){ success } }"),
   "J1.1" => ops.(200, "mutation { requestPasswordReset(input:{email:\"#{uniq}\"}){ success } }"),
   "J1.2" => ops.(20, ME) }.each do |name, batch|
   r = http(body: batch, headers: { "Authorization" => "Bearer #{jt}" })
@@ -475,10 +492,10 @@ rec("J3.2", "guessed names that exist as fields (review: each must be intended a
 # J4: error messages. No class names, file paths, SQL, or stack traces in anything a client can trigger.
 leak = /\.rb\b|\/app\/|\/gems\/|\/lib\/|ActiveRecord|ActionController|PG::|Errno|NoMethodError|NameError|SELECT\s|INSERT\s|#<|backtrace|stack ?trace|Traceback/i
 probes = {
-  "syntax error" => { query: "{ me { " }, "unknown field" => { query: "{ meee }" }, "bad enum/arg type" => { query: "mutation { login(input: 5){ token } }" },
+  "syntax error" => { query: "{ me { " }, "unknown field" => { query: "{ meee }" }, "bad enum/arg type" => { query: "mutation { login(input: 5){ success } }" },
   "null for required" => { query: LOGIN, variables: { i: nil } }, "bad variable type" => { query: LOGIN, variables: { i: { email: 5, password: [ 1 ] } } },
   "unknown directive" => { query: "{ me @nope { id } }" }, "wrong content" => { query: ME, variables: "[1]" },
-  "deep nesting" => { query: "{ " + "me { " * 300 + "id" + " }" * 300 + " }" }, "huge int" => { query: "mutation { login(input:{email:\"a@b.test\", password:99999999999999999999999}){ token } }" },
+  "deep nesting" => { query: "{ " + "me { " * 300 + "id" + " }" * 300 + " }" }, "huge int" => { query: "mutation { login(input:{email:\"a@b.test\", password:99999999999999999999999}){ success } }" },
   "unterminated string" => { query: "mutation { login(input:{email:\"abc" }
 }
 leaks = probes.filter_map do |name, b|
@@ -516,14 +533,13 @@ check("K1", "signUp with an extra `role` input is rejected and creates no user",
       k_res[:json]&.dig("errors") && !tok_of(k_res) && otp("role", k_email).empty?, k_res[:body][0, 160], bad: "CRITICAL")
 
 k_email = uniq
-signup(k_email)
+k_tok = tok_of(signup(k_email))
 check("K2", "a normal signUp creates a member", role_of(k_email) == "member", role_of(k_email), bad: "CRITICAL")
 
 k_res = gql(LOGIN, variables: { i: { email: k_email, password: PW, role: "super_admin" } })
 check("K3", "login with an extra `role` input is rejected", k_res[:json]&.dig("errors") && !tok_of(k_res, "login"), k_res[:body][0, 160], bad: "HIGH")
 check("K4", "role is still member after the attempts above", role_of(k_email) == "member", role_of(k_email), bad: "CRITICAL")
 
-k_tok = tok_of(login(k_email), "login")
 k_me = gql(ME, token: k_tok)
 check("K5", "a member can read only themselves with me", k_me[:json]&.dig("data", "me", "email") == k_email, k_me[:body][0, 120])
 k_role = gql("{ me { role } }", token: k_tok)
@@ -727,7 +743,7 @@ def inv_state(email) = (JSON.parse(otp("inv_state", email)) rescue {})
 m_admin_email = uniq
 m_admin_tok = tok_of(signup(m_admin_email))
 otp("make_admin", m_admin_email)
-m_admin_tok = tok_of(login(m_admin_email), "login") # a fresh login, the role is read from the database on each request
+# The token from signUp stays valid: the role is read from the database on each request.
 m_member_tok = tok_of(signup(uniq))
 
 none = [ inv(nil, uniq), inv("garbage", uniq), inv_revoke(nil, uniq), inv_revoke("garbage", uniq), inv_resend(nil, uniq), inv_resend("garbage", uniq) ]
@@ -1054,6 +1070,117 @@ check("R4", "accepting again keeps the first time (the client cannot move it)", 
 
 check("R5", "the terms step: not finished while the earlier steps are open, finished by the server after the profile and the address are saved",
       onb_of(r_a)&.dig("steps")&.find { |x| x["key"] == "terms" }&.dig("completed") == false && (prof_save(r_a); addr_save(r_a); onb_of(r_a)&.dig("completed") == true), onb_of(r_a).inspect[0, 160], bad: "HIGH")
+
+# ---------- S. OTP login (two steps: the password, then the emailed code) ----------
+# `login` checks the password and emails a code, with no token. `verifyLoginCode` trades the code for a token.
+# Black-box checks run in both modes. The code is issued into the test database (the "inbox") in test mode only: prod mode has another key.
+def vcode(r) = r[:json]&.dig("data", "verifyLoginCode", "errors", 0, "code")
+def vtok(r) = tok_of(r, "verifyLoginCode")
+
+s_email = uniq
+signup(s_email)
+s_nocode = uniq
+signup(s_nocode)
+s1 = login_step1(s_email)
+check("S1", "login with the right password answers success and NO token, and no code (step 1 only)",
+      s1[:json]&.dig("data", "login", "success") == true && !s1[:body].include?("token") && !s1[:body].match?(/\d{6}/), s1[:body][0, 160], bad: "CRITICAL")
+check("S2", "verifyLoginCode is on the public (throttled) list", PUBLIC_OPS.include?("verifyLoginCode"), PUBLIC_OPS.inspect, bad: "HIGH")
+unknown_v = verify_login(uniq, "123456")
+nocode_v = verify_login(s_nocode, "123456")
+wrong_v = verify_login(s_email, "123456")
+check("S3", "unknown email, user without a code, and wrong code give one identical INVALID_CODE answer, and no token",
+      [ unknown_v, nocode_v, wrong_v ].map { |x| x[:json] }.uniq.size == 1 && vcode(unknown_v) == "INVALID_CODE" && !vtok(unknown_v), unknown_v[:body][0, 160], bad: "HIGH")
+odd_codes = [ "", "12345", "1234567", "12ab56", "' OR 1=1 --", "x" * 5000, "123456\n", "１２３４５６", "١٢٣٤٥٦", "%d%d%d%d%d%d" ]
+odd_v = odd_codes.map { |c| verify_login(s_email, c) }
+check("S4", "odd codes: clean answers and never a token", odd_v.all? { |x| clean?(x) && !vtok(x) }, odd_v.map { |x| vcode(x) || code(x) }.tally.inspect, bad: "MEDIUM")
+odd_mail = [ "not-an-email", "", "x" * 5000, "' OR 1=1 --", "a@b.test\r\nBcc: evil@x.test", { "$ne" => "" } ].map { |m| verify_login(m, "123456") }
+check("S5", "odd emails in verifyLoginCode: clean answers and never a token", odd_mail.all? { |x| clean?(x) && !vtok(x) }, odd_mail.map { |x| x[:status] }.tally.inspect, bad: "CRITICAL")
+aliases = (1..200).map { |i| "a#{i}: verifyLoginCode(input:{email:\"#{s_email}\", code:\"#{format('%06d', i)}\"}){ token }" }.join(" ")
+r = gql("mutation { #{aliases} }")
+check("S6", "200 aliased verifyLoginCode in ONE request are refused (aliases would multiply guesses)", r[:status] == 400 || r[:status] == 200 && !r[:json]&.dig("data"), "status=#{r[:status]} #{r[:body][0, 100]}", bad: "HIGH")
+r = gql(VERIFY_LOGIN, variables: { i: { email: s_email, code: "123456", role: "super_admin" } })
+check("S7", "verifyLoginCode with an extra `role` input is rejected", r[:json]&.dig("errors") && !vtok(r), r[:body][0, 160], bad: "HIGH")
+
+# Throttle counters need a real cache: the test environment uses a null store, so this runs in prod mode only.
+if LABEL == "prod"
+  $pinned_ip = "10.97.97.#{rand(1..254)}"
+  statuses = 14.times.map { verify_login(uniq, "123456")[:status] }
+  check("S8", "11th verifyLoginCode from one IP in a minute -> 429", statuses[10..].all? { |c| c == 429 } && statuses[0..9].none? { |c| c == 429 }, statuses.tally.inspect, bad: "HIGH")
+  $pinned_ip = nil
+end
+
+if LABEL == "test"
+  ask_code = ->(e) { login_step1(e)[:json]&.dig("data", "login", "success") == true ? otp("login_mint", e) : nil }
+  fresh = -> { e = uniq; signup(e); e }
+
+  e = fresh.call
+  c = ask_code.(e)
+  r = verify_login(e, c)
+  check("S10", "step 1, then the right code: a token, and the token works",
+        c.to_s.match?(/\A\d{6}\z/) && vtok(r) && gql(ME, token: vtok(r))[:json]&.dig("data", "me", "email") == e, r[:body][0, 160], bad: "HIGH")
+  r = verify_login(e, c)
+  check("S11", "replay: the same code a second time is INVALID_CODE", vcode(r) == "INVALID_CODE" && !vtok(r), r[:body][0, 160], bad: "CRITICAL")
+
+  e = fresh.call
+  c = ask_code.(e)
+  5.times { verify_login(e, wrong_guess(c)) }
+  r = verify_login(e, c)
+  check("S12", "5 wrong guesses delete the code: even the right code is INVALID_CODE", vcode(r) == "INVALID_CODE" && !vtok(r), r[:body][0, 160], bad: "CRITICAL")
+
+  ea = fresh.call
+  eb = fresh.call
+  ca = ask_code.(ea)
+  ask_code.(eb)
+  r = verify_login(eb, ca)
+  check("S13", "the code of user A does not log in user B", vcode(r) == "INVALID_CODE" && !vtok(r) && vtok(verify_login(ea, ca)), r[:body][0, 160], bad: "CRITICAL")
+
+  e = fresh.call
+  reset_code_value = otp("mint", e) # a password reset code, not a login code
+  r = verify_login(e, reset_code_value)
+  check("S14", "a password reset code does not log in", vcode(r) == "INVALID_CODE" && !vtok(r), r[:body][0, 160], bad: "CRITICAL")
+
+  e = fresh.call
+  c = ask_code.(e)
+  otp("login_expire", e)
+  r = verify_login(e, c)
+  check("S15", "an expired code is INVALID_CODE", vcode(r) == "INVALID_CODE" && !vtok(r), r[:body][0, 160], bad: "HIGH")
+
+  e = fresh.call
+  c = ask_code.(e)
+  7.times { login_step1(e, "wrong-pw-#{SecureRandom.hex(3)}") } # a new IP each time: only the account lock can stop this
+  r = verify_login(e, c)
+  check("S16", "an account locked between the two steps gets no token, even with the right code", vcode(r) == "INVALID_CODE" && !vtok(r), r[:body][0, 160], bad: "HIGH")
+
+  e = fresh.call
+  5.times do
+    c = ask_code.(e)
+    5.times { verify_login(e, wrong_guess(c)) }
+  end
+  r = login_step1(e)
+  check("S17", "5 used-up codes lock the account: the right password is refused with INVALID_CREDENTIALS",
+        r[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", r[:body][0, 160], bad: "HIGH")
+
+  e = fresh.call
+  12.times { verify_login(e, "123456") } # nobody asked for a code: this guesser has no password
+  check("S18", "someone who only knows the email cannot lock the account", tok_of(login(e), "login"), bad: "HIGH")
+
+  e = fresh.call
+  c = ask_code.(e)
+  5.times { verify_login(e, wrong_guess(c)) } # an email-only guesser can burn an outstanding code (accepted), nothing more
+  check("S19", "after a burned code the user asks again and logs in (no lock from one burned code)", tok_of(login(e), "login"), bad: "MEDIUM")
+
+  e = fresh.call
+  3.times { login_step1(e, "wrong-pw-#{SecureRandom.hex(3)}") }
+  login_step1(e) # the right password: must not reset the counter, only a verified code does
+  2.times { login_step1(e, "wrong-pw-#{SecureRandom.hex(3)}") }
+  r = login_step1(e)
+  check("S20", "the right password at step 1 does not reset the failed-attempt counter", r[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", r[:body][0, 160], bad: "HIGH")
+
+  e = fresh.call
+  c = ask_code.(e)
+  res = 8.times.map { Thread.new { verify_login(e, c) } }.map(&:value)
+  check("S21", "8 parallel verifications of one code give exactly one token", res.count { |x| vtok(x) } == 1 && res.all? { |x| clean?(x) }, res.map { |x| vtok(x) ? "token" : vcode(x) }.tally.inspect, bad: "CRITICAL")
+end
 
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"

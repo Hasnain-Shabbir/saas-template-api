@@ -9,6 +9,8 @@
 #   ec_expire  make the user's email_change code expired
 #   ec_state print JSON: email, pending, previous, code present, attempts, locked, failed attempts, token count
 #   ec_mail  EMAIL NEW_EMAIL  like ec_mint, but print the code mail (html, marker line, text) instead of the code
+#   login_mint   delete the user's login code, issue a fresh one, print the plain code (the second login step reads it from the email)
+#   login_expire make the user's login code expired
 #   make_admin    make the user a super_admin (the API has no way to do that, on purpose)
 #   inv_mint EMAIL ROLE  create an open invitation for EMAIL and print its plain token (the invitee's inbox). Test mode only:
 #                        production mode has another secret key, so its digests do not match
@@ -76,6 +78,11 @@ when "mint"
   print Auth::IssueOneTimeCode.call(user: user, purpose: :password_reset).value
 when "expire"
   OneTimeCode.where(user_id: user.id).update_all(expires_at: 1.minute.ago)
+when "login_mint"
+  OneTimeCode.where(user_id: user.id, purpose: "login").delete_all
+  print Auth::IssueOneTimeCode.call(user: user, purpose: :login).value
+when "login_expire"
+  OneTimeCode.where(user_id: user.id, purpose: "login").update_all(expires_at: 1.minute.ago)
 when "mail"
   OneTimeCode.where(user_id: user.id).delete_all
   code = Auth::IssueOneTimeCode.call(user: user, purpose: :password_reset).value

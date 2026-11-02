@@ -18,12 +18,13 @@ Act as a hostile security tester and a QA engineer. The goal is to break the API
 ```
 Both servers run with `ALLOW_PUBLIC_SIGN_UP=true` (the template default is off), because the script makes its users with `signUp`. Every user the script makes is onboarded at once (profile, address and terms saved: the server finishes the steps) because members are blocked from everything else until then; sections N and P make users with `onboard: false` to test that. The production-mode server gets random throwaway Active Record Encryption keys from environment variables. The default-off answer (FORBIDDEN) is covered by a spec, not by this run. `otp_helper.rb` also promotes a user to super_admin and mints invitations (test database only).
 It starts two servers (test mode on 4001, production mode on 4002), runs `scripts/attack.rb` against both, checks the production log for leaked credentials, stops the servers, and empties the test database. Takes about 3 to 4 minutes.
+Login has two steps. In test mode the script issues the login code into the test database (`otp_helper.rb login_mint`), like an inbox. Production mode has another key, so it can only check step 1 and the black-box cases: positive checks that need a token use the one from `signUp`. The log check (LOG9) also writes a login code inline and as a variable.
 Baseline first: `bundle exec rspec`, `bin/rubocop`, `bin/brakeman -q`.
 
 ## What it covers
 | Section | Attacks |
 |---|---|
-| A | Functional regression: signup, login, logout, duplicates, case and spaces, password rules |
+| A | Functional regression: signup, two-step login (password, then the emailed code), logout, duplicates, case and spaces, password rules |
 | B | Token attacks: `alg=none`, wrong secret, expired, tampered payload, flipped signature, garbage, wrong scheme |
 | C | Input fuzzing: SQL injection (also blind `pg_sleep` timing and second-order LIKE patterns), header injection, XSS and template payloads (the reset email body is check I24), look-alike characters, oversized bodies, extra fields |
 | D | GraphQL abuse: introspection, suggestions, alias batching, fragment cycles, directive floods, complexity, malformed variables and bodies, wrong content types |
@@ -40,6 +41,7 @@ Baseline first: `bundle exec rspec`, `bin/rubocop`, `bin/brakeman -q`.
 | Q | Address: UNAUTHENTICATED before validation (Q1), empty address (Q2), wrong state, ZIP code and country, only US accepted (Q3), hostile and empty text, 100 vs 101 characters (Q4), mass assignment (Q5), save and read back (Q6), same data again (Q7), optional line 2 (Q7a), isolation between users (Q8), parallel saves (Q9), the server finishes the address step in order (Q10) |
 | R | Terms: empty at first (R1), a wrong version is refused and nothing is recorded (R2), the current version is recorded with the server time (R3), accepting again keeps the first time (R4), the server finishes the terms step after the earlier steps (R5) |
 | AUD | Audit log (test mode, runs last): rows exist (AUD1), no password, bcrypt digest, JWT, email address, profile or address value in any row (AUD2), every row has a user id, `anonymous` or `system:<label>` as actor (AUD3), sensitive fields are by name only (AUD4), the app cannot update or delete a row (AUD5) |
+| S | OTP login: step 1 gives success and no token (S1), `verifyLoginCode` is public and throttled (S2, S8), one identical answer for unknown email, no code and wrong code (S3), odd codes and emails (S4, S5), alias batching refused (S6), mass assignment (S7); test mode with an issued code: happy path (S10), replay (S11), 5 guesses kill the code (S12), another user's code (S13), a reset code (S14), expired (S15), locked between the steps (S16), used-up codes lock the account (S17), an email-only guesser cannot lock it (S18, S19), step 1 does not reset the counter (S20), parallel use of one code gives one token (S21) |
 | LOG | Production log must contain no inline password, email, JWT, or profile value (LOG7, LOG8) |
 
 `INTERNAL_ERROR` anywhere in a response, or any status of 500, is a finding (the error tracker would also get noise).

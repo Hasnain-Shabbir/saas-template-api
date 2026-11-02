@@ -32,10 +32,16 @@ bundle exec ruby "$HERE/attack.rb" http://127.0.0.1:4002 prod "$OUT/prod.json" "
 
 # Log leak check: credentials written inline and a live token must not appear in the log.
 MARK="leak$(openssl rand -hex 4)"
-curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.1' \
-  -d "{\"query\":\"mutation{signUp(input:{email:\\\"$MARK@example.test\\\",password:\\\"PW-$MARK-long-enough\\\"}){token}}\"}"
-TOKEN=$(curl -s -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.2' \
-  -d "{\"query\":\"mutation{login(input:{email:\\\"$MARK@example.test\\\",password:\\\"PW-$MARK-long-enough\\\"}){token}}\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+# The token comes from signUp: a login needs the emailed code, which this script cannot read in production mode.
+TOKEN=$(curl -s -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.1' \
+  -d "{\"query\":\"mutation{signUp(input:{email:\\\"$MARK@example.test\\\",password:\\\"PW-$MARK-long-enough\\\"}){token}}\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+# Credentials written inline in a login (step 1) and a code written inline in verifyLoginCode (step 2) must not reach the log either.
+curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.2' \
+  -d "{\"query\":\"mutation{login(input:{email:\\\"$MARK@example.test\\\",password:\\\"PW-$MARK-long-enough\\\"}){success}}\"}"
+curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.4' \
+  -d "{\"query\":\"mutation{verifyLoginCode(input:{email:\\\"$MARK@example.test\\\",code:\\\"LC-$MARK\\\"}){token}}\"}"
+curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.5' \
+  -d "{\"query\":\"mutation(\$i: VerifyLoginCodeInput!){verifyLoginCode(input:\$i){token}}\",\"variables\":{\"i\":{\"email\":\"$MARK@example.test\",\"code\":\"LCV-$MARK\"}}}"
 curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H "Authorization: Bearer $TOKEN" -d '{"query":"{me{id}}"}'
 curl -s -o /dev/null -XPOST localhost:4002/graphql -H 'content-type: application/json' -H 'X-Forwarded-For: 10.250.1.3' \
   -d "{\"query\":\"mutation(\$i: ResetPasswordInput!){resetPassword(input:\$i){success}}\",\"variables\":{\"i\":{\"email\":\"x@example.test\",\"code\":\"CODE-$MARK\",\"password\":\"PW-$MARK-other\"}}}"
@@ -50,6 +56,7 @@ sleep 1
   echo "LOG3 JWT in log:              $( [ -n "$TOKEN" ] && grep -c "${TOKEN:0:40}" "$OUT/server_prod.log" || echo 0)  (want 0)"
   echo "LOG4 'Bearer ' in log:        $(grep -c 'Bearer ' "$OUT/server_prod.log")  (want 0)"
   echo "LOG6 one-time code variable:  $(grep -c "CODE-$MARK" "$OUT/server_prod.log")  (want 0)"
+  echo "LOG9 login code, inline/var:  $(grep -c "LC-$MARK\|LCV-$MARK" "$OUT/server_prod.log")  (want 0)"
   echo "LOG7 profile names in log:    $(grep -c "FN-$MARK\|LN-$MARK\|FNI-$MARK\|LNI-$MARK" "$OUT/server_prod.log")  (want 0)"
   echo "LOG8 phone or birth date:     $(grep -c '+14155550199\|1971-03-09' "$OUT/server_prod.log")  (want 0)"
   echo "LOG5 stack traces for 500s:   $(grep -c 'Puma caught this error' "$OUT/server_test.log")  (want 0)"
