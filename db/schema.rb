@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_30_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_02_100001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -102,7 +102,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_30_120000) do
     t.datetime "updated_at", null: false
     t.index ["user_id", "purpose"], name: "index_one_time_codes_on_user_id_and_purpose", unique: true
     t.check_constraint "attempts >= 0", name: "one_time_codes_attempts_check"
-    t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying, 'email_change'::character varying]::text[])", name: "one_time_codes_purpose_check"
+    t.check_constraint "purpose::text = ANY (ARRAY['password_reset'::character varying, 'email_change'::character varying, 'login'::character varying]::text[])", name: "one_time_codes_purpose_check"
   end
 
   create_table "read_audits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

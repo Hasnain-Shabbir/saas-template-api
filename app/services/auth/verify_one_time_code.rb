@@ -3,7 +3,8 @@ module Auth
     # Checks a code without using it up (the caller deletes it when its action succeeds). Returns the code record.
     # An unknown user, a bad format, no code, a wrong code, and an expired code all give the same failure.
     # A wrong guess is counted, and guess number MAX_ATTEMPTS deletes the code. The row lock makes parallel guesses queue up.
-    def self.call(user:, purpose:, code:)
+    # A caller that wants to react to a used-up code passes a block: it runs, inside the transaction, when guess number MAX_ATTEMPTS deletes it.
+    def self.call(user:, purpose:, code:, &on_exhausted)
       return invalid unless user && code.to_s.match?(ValidationRules::OTP_FORMAT)
 
       OneTimeCode.transaction do
@@ -15,7 +16,10 @@ module Auth
         next Result.success(record) if record.matches?(digest)
 
         record.increment!(:attempts)
-        record.destroy! if record.attempts >= OneTimeCode::MAX_ATTEMPTS
+        if record.attempts >= OneTimeCode::MAX_ATTEMPTS
+          record.destroy!
+          on_exhausted&.call
+        end
         invalid
       end
     end
