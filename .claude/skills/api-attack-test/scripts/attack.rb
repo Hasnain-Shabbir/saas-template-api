@@ -738,6 +738,10 @@ def inv_revoke(token, email) = gql(REVOKE, variables: { i: { email: email } }, t
 def inv_resend(token, email) = gql(RESEND, variables: { i: { email: email } }, token: token)
 def accept_ok?(r) = !r[:json]&.dig("data", "acceptInvitation", "token").nil?
 def accept_err(r) = r[:json]&.dig("data", "acceptInvitation", "errors", 0, "code")
+INVITE_STATUS = "query T($t: String!){ invitationStatus(token:$t){ valid errors{message path code} } }"
+def inv_status(tok) = gql(INVITE_STATUS, variables: { t: tok })
+def status_valid?(r) = r[:json]&.dig("data", "invitationStatus", "valid")
+def status_err(r) = r[:json]&.dig("data", "invitationStatus", "errors", 0, "code")
 def inv_state(email) = (JSON.parse(otp("inv_state", email)) rescue {})
 
 m_admin_email = uniq
@@ -763,6 +767,19 @@ rs = nasty.map { |v| inv_accept(v) }
 check("M3", "acceptInvitation with wrong or hostile tokens: INVALID_INVITATION (or a schema error for NUL), never a 500, same message",
       rs.all? { |x| clean?(x) && (accept_err(x) == "INVALID_INVITATION" || x[:json]&.dig("errors")) } && rs.filter_map { |x| accept_err(x) }.uniq.size <= 1,
       rs.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "HIGH")
+
+status_rs = nasty.map { |v| inv_status(v) }
+check("M3b", "invitationStatus with wrong or hostile tokens: INVALID_INVITATION (or a schema error for NUL), never a 500, valid never true, same message",
+      status_rs.all? { |x| clean?(x) && status_valid?(x) != true && (status_err(x) == "INVALID_INVITATION" || x[:json]&.dig("errors")) } && status_rs.filter_map { |x| status_err(x) }.uniq.size <= 1,
+      status_rs.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "HIGH")
+status_empty = inv_status("")
+check("M3c", "invitationStatus with an empty token: VALIDATION_FAILED (required), not INVALID_INVITATION", status_err(status_empty) == "VALIDATION_FAILED", status_empty[:body][0, 120], bad: "LOW")
+status_extra = gql("query { invitationStatus(token: \"x\", email: \"a@b.test\") { valid } }")
+check("M3d", "invitationStatus takes only a token: an extra argument is a schema error", status_extra[:json]&.dig("errors") && !status_extra[:body].include?("INTERNAL_ERROR"), status_extra[:body][0, 100], bad: "MEDIUM")
+status_fields = gql("query { invitationStatus(token: \"x\") { valid email role inviter { email } } }")
+check("M3e", "invitationStatus has no email, role, or inviter field to leak", status_fields[:json]&.dig("errors") && status_fields[:json]["data"].nil?, status_fields[:body][0, 100], bad: "HIGH")
+status_batch = gql("query { a: invitationStatus(token: \"x\") { valid } b: invitationStatus(token: \"y\") { valid } }")
+check("M3f", "several public operations in one request (aliased invitationStatus) are refused as a whole", code(status_batch) == "BAD_REQUEST" && status_batch[:status] == 400, status_batch[:body][0, 100], bad: "HIGH")
 
 mass = [ inv(m_admin_tok, uniq, { inviterId: SecureRandom.uuid }), inv(m_admin_tok, uniq, { tokenDigest: "x" }), inv(m_admin_tok, uniq, { acceptedAt: "2020-01-01" }),
          inv_accept("A" * 43, PW, { role: "SUPER_ADMIN" }), inv_accept("A" * 43, PW, { email: uniq }) ]
@@ -828,6 +845,21 @@ if LABEL == "test"
   check("M14", "8 parallel accepts with the same token: exactly one wins, no 500, one user", rs.count { |x| accept_ok?(x) } == 1 && rs.all? { |x| clean?(x) }, rs.map { |x| x[:body][0, 60] }.tally.inspect, bad: "HIGH")
 
   e, t = mint.call
+  r = inv_status(t)
+  check("M7a", "invitationStatus with a valid token, as nobody: valid true, nothing else, and the invitation is not used up",
+        status_valid?(r) == true && r[:json].dig("data", "invitationStatus", "errors") == [] && inv_status(t)[:json] == r[:json] && accept_ok?(inv_accept(t)), r[:body][0, 120], bad: "HIGH")
+  r = inv_status(t)
+  check("M7b", "invitationStatus after the token was used: INVALID_INVITATION", status_err(r) == "INVALID_INVITATION" && status_valid?(r) == false, r[:body][0, 120], bad: "HIGH")
+
+  e, t = mint.call
+  otp("inv_expire", e)
+  r1 = inv_status(t)
+  e2, t2 = mint.call
+  inv_revoke(m_admin_tok, e2)
+  r2 = inv_status(t2)
+  check("M7c", "invitationStatus for an expired and a revoked invitation: the same INVALID_INVITATION answer", [ r1, r2 ].all? { |x| status_err(x) == "INVALID_INVITATION" } && r1[:json] == r2[:json], "#{r1[:body][0, 80]} | #{r2[:body][0, 80]}", bad: "HIGH")
+
+  e, t = mint.call
   inv_accept(t)
   m_new_tok = tok_of(login(e), "login")
   onboard!(m_new_tok) # the gate comes before authorization: without this the answer would be ONBOARDING_REQUIRED, not FORBIDDEN
@@ -860,6 +892,9 @@ end
 if LABEL == "prod"
   $pinned_ip = "10.98.98.#{rand(1..254)}"
   codes = 32.times.map { inv(m_admin_tok, uniq)[:status] }
+  status_codes = 22.times.map { inv_status("x")[:status] }
+  check("M17b", "21st invitationStatus from one IP in a minute -> 429, apart from the public mutations", status_codes[20..].all? { |c| c == 429 } && status_codes[0..19].none? { |c| c == 429 }, status_codes.tally.inspect, bad: "HIGH")
+  check("M17c", "...and a public mutation still has its own budget", gql("mutation { login(input:{ email:\"nobody@example.test\", password:\"x\" }){ success } }")[:status] != 429, bad: "LOW")
   check("M17", "31st invitation operation from one IP in an hour -> 429", codes[30..].all? { |c| c == 429 } && codes[0..29].none? { |c| c == 429 }, codes.tally.inspect, bad: "HIGH")
   $pinned_ip = nil
 end

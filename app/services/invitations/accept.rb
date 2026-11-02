@@ -6,12 +6,9 @@ module Invitations
       missing = missing_fields(token:, password:)
       return Errors.failure(Errors::VALIDATION_FAILED, errors: missing) if missing
 
-      return invalid unless token.to_s.match?(ValidationRules::INVITATION_TOKEN_FORMAT)
-
       Invitation.transaction do
-        invitation = Invitation.lock.find_by(token_digest: Invitation.digest(token))
-        next invalid unless invitation&.usable?
-        next invalid if User.exists?(email: invitation.email) # say nothing about the existing account
+        invitation = Invitation.lock.find_by_token(token)
+        next invalid unless invitation&.acceptable? # say nothing about an existing account
 
         user = User.new(email: invitation.email, password:, role: invitation.role)
         # A weak password does not use the invitation up, so the invitee can try again.

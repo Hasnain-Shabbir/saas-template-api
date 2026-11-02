@@ -6,6 +6,7 @@ RSpec.describe AuthGate do
   it "does not need a login for a public operation" do
     expect(required?("mutation { login(input: {}) { token } }")).to be(false)
     expect(required?("mutation { signUp(input: {}) { token } }")).to be(false)
+    expect(required?("{ invitationStatus(token: \"x\") { valid } }")).to be(false)
   end
 
   it "needs a login for any other operation, query or mutation" do

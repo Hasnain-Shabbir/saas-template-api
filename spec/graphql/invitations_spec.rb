@@ -204,6 +204,60 @@ RSpec.describe "Invitations", type: :request do
     end
   end
 
+  describe "invitationStatus" do
+    let(:status_query) { "query($token: String!) { invitationStatus(token: $token) { valid errors { message path code } } }" }
+
+    def status(token) = gql(status_query, variables: { token: }).dig("data", "invitationStatus")
+
+    before { invite("fresh@example.test") }
+
+    let(:token) { emailed_token }
+    let(:invalid) { { "valid" => false, "errors" => [ { "message" => Errors::INVALID_INVITATION.message, "path" => [ "input" ], "code" => "INVALID_INVITATION" } ] } }
+
+    it "says valid for an open invitation, for nobody logged in, and does not use it up" do
+      expect(status(token)).to eq("valid" => true, "errors" => [])
+      expect(status(token)).to eq("valid" => true, "errors" => [])
+      expect(accept(token).dig("data", "acceptInvitation", "token")).to be_present
+    end
+
+    it "says INVALID_INVITATION after the invitation is used, revoked, or expired" do
+      expired_token = emailed_token
+      travel(Invitation::LIFETIME + 1.minute) { expect(status(expired_token)).to eq(invalid) }
+
+      revoke("fresh@example.test")
+      expect(status(token)).to eq(invalid)
+
+      invite("fresh@example.test")
+      fresh = emailed_token
+      accept(fresh)
+      expect(status(fresh)).to eq(invalid)
+    end
+
+    it "says INVALID_INVITATION when the address already has an account, like acceptInvitation" do
+      create(:user, email: "fresh@example.test")
+
+      expect(status(token)).to eq(invalid)
+    end
+
+    it "gives the same answer for a wrong or malformed token, and returns nothing about the invitation" do
+      wrong = [ Invitation.generate_token, "short", "a" * 10_000, "' OR 1=1 --", token.reverse ]
+
+      expect(wrong.map { |value| status(value) }).to all(eq(invalid))
+      expect(status(token).keys).to eq(%w[valid errors])
+    end
+
+    it "says a field is required (not invalid) when the token is empty" do
+      expect(status("")["errors"]).to eq([ { "message" => "Token is required", "path" => %w[input token], "code" => "VALIDATION_FAILED" } ])
+      expect(status("   ")["errors"].map { |error| error["code"] }).to eq([ "VALIDATION_FAILED" ])
+    end
+
+    it "does not need a login and is not asked for one (the schema, not AuthGate, answers)" do
+      body = gql("query { invitationStatus { valid } }")
+
+      expect(error_code(body)).not_to eq("UNAUTHENTICATED")
+    end
+  end
+
   describe "acceptInvitation" do
     before { invite("fresh@example.test") }
 

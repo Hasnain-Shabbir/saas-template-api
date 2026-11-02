@@ -147,6 +147,26 @@ RSpec.describe "Rate limiting and request guards", type: :request do
       expect_error(:too_many_requests, :RATE_LIMITED)
     end
 
+    it "limits invitationStatus to 20 per minute per IP, apart from the public mutations" do
+      status = "query($token: String!) { invitationStatus(token: $token) { valid errors { code } } }"
+      20.times { gql(status, variables: { token: "x" }) }
+      expect(response).to have_http_status(:ok)
+
+      gql(status, variables: { token: "x" })
+      expect_error(:too_many_requests, :RATE_LIMITED)
+
+      gql(login, variables: wrong_login) # the mutation budget is separate
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "does not let a mutation spend the invitationStatus budget" do
+      10.times { gql(login, variables: wrong_login) }
+
+      gql("query { invitationStatus(token: \"x\") { valid } }")
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it "lists every logged-in mutation that sends or looks up an invitation" do
       expect(Rack::Attack::INVITATION_OPERATIONS).to match_array(%w[inviteUser resendInvitation revokeInvitation])
       expect(Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }).to include(*Rack::Attack::INVITATION_OPERATIONS)
@@ -185,12 +205,12 @@ RSpec.describe "Rate limiting and request guards", type: :request do
 
   # Default deny: a mutation that skips login (overrides ready?) is public, so it must be throttled.
   describe "coverage" do
-    it "lists exactly the mutations that do not require login" do
+    it "lists exactly the mutations that do not require login, and the public queries" do
       public_mutations = Types::MutationType.fields.values.select do |field|
         field.mutation.instance_method(:ready?).owner != Mutations::BaseMutation
       end
 
-      expect(public_mutations.map(&:graphql_name)).to match_array(Rack::Attack::PUBLIC_OPERATIONS)
+      expect(public_mutations.map(&:graphql_name) + Rack::Attack::PUBLIC_QUERIES).to match_array(Rack::Attack::PUBLIC_OPERATIONS)
     end
   end
 end

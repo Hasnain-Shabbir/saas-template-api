@@ -32,6 +32,11 @@ class Invitation < ApplicationRecord
   end
   private_class_method :digest_key
 
+  # The invitation for a token, or nil. A value that is not shaped like a token never reaches the database.
+  def self.find_by_token(token)
+    find_by(token_digest: digest(token)) if token.to_s.match?(ValidationRules::INVITATION_TOKEN_FORMAT)
+  end
+
   def self.generate_token = SecureRandom.urlsafe_base64(ValidationRules::INVITATION_TOKEN_BYTES)
 
   def open? = accepted_at.nil? && revoked_at.nil?
@@ -39,6 +44,9 @@ class Invitation < ApplicationRecord
   def expired? = expires_at <= Time.current
 
   def usable? = open? && !expired?
+
+  # Usable, and the address has no account yet. The one rule for "this link can still be accepted".
+  def acceptable? = usable? && !User.exists?(email:)
 
   def recently_sent? = last_sent_at.present? && last_sent_at > RESEND_AFTER.ago
 end

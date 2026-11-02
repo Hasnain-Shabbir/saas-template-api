@@ -1,6 +1,8 @@
 class Rack::Attack
-  # Mutations an anonymous caller can reach (the ones that override `ready?`). A spec fails if this list drifts.
-  PUBLIC_OPERATIONS = %w[login verifyLoginCode signUp requestPasswordReset resetPassword acceptInvitation].freeze
+  # Queries an anonymous caller can reach. They have their own limit, because a page may check on every load.
+  PUBLIC_QUERIES = %w[invitationStatus].freeze
+  # Operations an anonymous caller can reach: the mutations that override `ready?`, and the public queries. A spec fails if this list drifts.
+  PUBLIC_OPERATIONS = (%w[login verifyLoginCode signUp requestPasswordReset resetPassword acceptInvitation] + PUBLIC_QUERIES).freeze
   # Logged-in mutations that check a password or guess a code. Limited like public ones (per IP: the middleware runs before Warden,
   # and a token is never decoded without verification). A spec fails if one is missing.
   EMAIL_CHANGE_OPERATIONS = %w[requestEmailChange confirmEmailChange].freeze
@@ -61,9 +63,14 @@ class Rack::Attack
   # Aliases would multiply invitation emails.
   blocklist("graphql/batched-invitation-operations") { |req| invitation_operations(req).size > 1 }
 
-  # Per IP, for everything an anonymous caller can reach.
+  # Per IP, for every public mutation.
   throttle("public-operations/ip", limit: 10, period: 1.minute) do |req|
-    req.ip if public_operations(req).any?
+    req.ip if (public_operations(req) - PUBLIC_QUERIES).any?
+  end
+
+  # Per IP, for the public queries (token guesses and probing). Apart from the mutations, so a page load never costs a login.
+  throttle("public-queries/ip", limit: 20, period: 1.minute) do |req|
+    req.ip if (public_operations(req) & PUBLIC_QUERIES).any?
   end
 
   # Per IP, account creation spam.
