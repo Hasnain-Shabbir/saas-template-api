@@ -1217,6 +1217,122 @@ if LABEL == "test"
   check("S21", "8 parallel verifications of one code give exactly one token", res.count { |x| vtok(x) } == 1 && res.all? { |x| clean?(x) }, res.map { |x| vtok(x) ? "token" : vcode(x) }.tally.inspect, bad: "CRITICAL")
 end
 
+# ---------- U. Archive and unarchive a user (super_admin only, members only) ----------
+# Black-box checks run in both modes. The ones that need a login or reset code (the "inbox") run in test mode only.
+ARCHIVE = "mutation A($i: ArchiveUserInput!){ archiveUser(input:$i){ user{ id archivedAt } errors{message path code} } }"
+UNARCHIVE = "mutation U($i: UnarchiveUserInput!){ unarchiveUser(input:$i){ user{ id archivedAt } errors{message path code} } }"
+USERS_ARCHIVED = "{ users(archived: true) { items { id email archivedAt } } }"
+USERS_ACTIVE = "{ users { items { id email } } }"
+def archive(token, id, extra = {}) = gql(ARCHIVE, variables: { i: { id: id }.merge(extra) }, token: token)
+def unarchive(token, id) = gql(UNARCHIVE, variables: { i: { id: id } }, token: token)
+def arch_ok?(r, op = "archiveUser") = r[:json]&.dig("data", op, "errors") == [] && r[:json]&.dig("data", op, "user")
+def arch_state(email) = (JSON.parse(otp("archive_state", email)) rescue {})
+def make_member
+  email = uniq
+  r = signup(email)
+  [ email, tok_of(r), r[:json]&.dig("data", "signUp", "user", "id") ]
+end
+
+u_email, u_tok, u_id = make_member
+_other_email, other_tok, other_id = make_member
+u_admin_id = gql(ME, token: m_admin_tok)[:json]&.dig("data", "me", "id")
+u_admin2_email = uniq
+u_admin2_id = signup(u_admin2_email)[:json]&.dig("data", "signUp", "user", "id")
+otp("make_admin", u_admin2_email)
+
+none = [ archive(nil, u_id), archive("garbage", u_id), archive(nil, u_id, { bogus: 1 }), unarchive(nil, u_id), unarchive("garbage", u_id) ]
+check("U1", "archiveUser and unarchiveUser: no token or a garbage token is UNAUTHENTICATED, also with bad input",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+forbidden = [ archive(u_tok, other_id), archive(u_tok, SecureRandom.uuid), unarchive(u_tok, other_id), unarchive(u_tok, SecureRandom.uuid), archive(u_tok, u_id) ]
+check("U2", "a member gets FORBIDDEN on both, for another member, an unknown id and themselves (no way to find out which ids exist)",
+      forbidden.all? { |x| code(x) == "FORBIDDEN" } && arch_state(u_email)["archived"] == false, forbidden.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+# The scenarios below need a super_admin, and only the test database can make one (otp_helper): prod mode stops here.
+if LABEL != "test"
+  rec("U3", "archive scenarios that need a super_admin run in test mode only", "INFO")
+else
+r = archive(m_admin_tok, u_admin_id)
+check("U3", "a super_admin cannot archive themselves", code(r) == "FORBIDDEN" && arch_state(m_admin_email)["archived"] == false, r[:body][0, 120], bad: "HIGH")
+r = archive(m_admin_tok, u_admin2_id)
+check("U3b", "a super_admin cannot archive another super_admin", code(r) == "FORBIDDEN" && arch_state(u_admin2_email)["archived"] == false, r[:body][0, 120], bad: "HIGH")
+
+nf = [ archive(m_admin_tok, SecureRandom.uuid), archive(m_admin_tok, "' OR 1=1 --"), archive(m_admin_tok, "x" * 5000), unarchive(m_admin_tok, SecureRandom.uuid) ]
+check("U4", "an unknown or hostile id is NOT_FOUND for a super_admin, never a 500", nf.all? { |x| clean?(x) && code(x) == "NOT_FOUND" }, nf.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "MEDIUM")
+
+mass = [ archive(m_admin_tok, u_id, { archivedAt: "2020-01-01" }), archive(m_admin_tok, u_id, { role: "SUPER_ADMIN" }), archive(m_admin_tok, u_id, { archivedById: u_admin_id }) ]
+check("U5", "extra input fields (archivedAt, role, archivedById) are rejected by the schema, and nothing is archived",
+      mass.all? { |x| x[:json]&.dig("errors") && clean?(x) } && arch_state(u_email)["archived"] == false, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+# A pending login code first (test mode), so U8 shows that archive deletes it.
+otp("login_mint", u_email) if LABEL == "test"
+r = archive(m_admin_tok, u_id)
+check("U6", "a super_admin archives a member", arch_ok?(r) && r[:json].dig("data", "archiveUser", "user", "archivedAt"), r[:body][0, 140], bad: "HIGH")
+check("U7", "the token of the archived member is dead at once", code(gql(ME, token: u_tok)) == "UNAUTHENTICATED", gql(ME, token: u_tok)[:body][0, 100], bad: "CRITICAL")
+st = arch_state(u_email)
+check("U8", "archive deleted every token and pending code of the member", st["archived"] == true && st["tokens"] == 0 && st["codes"] == 0, st.inspect, bad: "HIGH")
+r2 = archive(m_admin_tok, u_id)
+check("U9", "archiving twice is safe (success, no 500)", arch_ok?(r2) && clean?(r2), r2[:body][0, 120], bad: "MEDIUM")
+
+step1 = login_step1(u_email)
+check("U10", "right password: ACCOUNT_ARCHIVED, and no login code is created", step1[:json]&.dig("data", "login", "errors", 0, "code") == "ACCOUNT_ARCHIVED" &&
+      step1[:json]&.dig("data", "login", "success") != true && arch_state(u_email)["codes"] == 0, step1[:body][0, 140], bad: "HIGH")
+wrong_arch = login_step1(u_email, "wrong-password-x")
+wrong_unknown = login_step1(uniq, "wrong-password-x")
+check("U11", "wrong password on an archived account looks like an unknown email (only the password holder learns it is archived)",
+      wrong_arch[:json] == wrong_unknown[:json] && wrong_arch[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", wrong_arch[:body][0, 120], bad: "HIGH")
+
+if LABEL == "test"
+  v = verify_login(u_email, otp("login_mint", u_email))
+  check("U12", "step 2 with a valid login code of an archived user: INVALID_CODE, no token", v[:json]&.dig("data", "verifyLoginCode", "token").nil? &&
+        v[:json]&.dig("data", "verifyLoginCode", "errors", 0, "code") == "INVALID_CODE", v[:body][0, 120], bad: "CRITICAL")
+else
+  rec("U12", "login code of an archived user needs the database helper (test mode only)", "INFO")
+end
+
+RESET_REQ = "mutation R($i: RequestPasswordResetInput!){ requestPasswordReset(input:$i){ success errors{message path code} } }"
+RESET_DO = "mutation D($i: ResetPasswordInput!){ resetPassword(input:$i){ success errors{message path code} } }"
+req_arch = gql(RESET_REQ, variables: { i: { email: u_email } })
+req_unknown = gql(RESET_REQ, variables: { i: { email: uniq } })
+check("U13", "password reset request for an archived user answers exactly like an unknown email, and no code is made",
+      req_arch[:json] == req_unknown[:json] && req_arch[:json]&.dig("data", "requestPasswordReset", "success") == true, req_arch[:body][0, 120], bad: "HIGH")
+
+# Even a valid reset code (made by hand in the database) must not work for an archived user.
+# An own user for this: a reset that works would change the password the later checks use.
+r_email, _r_tok, r_id = make_member
+archive(m_admin_tok, r_id)
+rd = gql(RESET_DO, variables: { i: { email: r_email, code: otp("mint", r_email), password: "An0ther-Str0ng-Pass!" } })
+check("U14", "resetPassword with a valid code does not work for an archived user",
+      rd[:json]&.dig("data", "resetPassword", "success") != true && arch_state(r_email)["archived"] == true, rd[:body][0, 140], bad: "MEDIUM")
+
+su = gql("mutation S($i: SignUpInput!){ signUp(input:$i){ token errors{code} } }", variables: { i: { email: u_email, password: PW } })
+su_dup = gql("mutation S($i: SignUpInput!){ signUp(input:$i){ token errors{code} } }", variables: { i: { email: _other_email, password: PW } })
+check("U15", "signUp with an archived email fails like any taken email, and gives no token", tok_of(su).nil? && su[:json] == su_dup[:json], su[:body][0, 120], bad: "MEDIUM")
+
+a_arch = inv(m_admin_tok, u_email)
+a_new = inv(m_admin_tok, uniq)
+check("U16", "inviteUser for an archived email answers exactly like a new email", a_arch[:json] == a_new[:json], "#{a_arch[:body][0, 90]} | #{a_new[:body][0, 90]}", bad: "MEDIUM")
+
+lst_arch = gql(USERS_ARCHIVED, token: m_admin_tok)
+lst_act = gql(USERS_ACTIVE, token: m_admin_tok)
+check("U17", "the archived member is only in the archived list, not in the default list",
+      lst_arch[:json]&.dig("data", "users", "items")&.any? { |x| x["id"] == u_id && x["archivedAt"] } &&
+      lst_act[:json]&.dig("data", "users", "items")&.none? { |x| x["id"] == u_id }, "#{lst_arch[:body][0, 100]}", bad: "MEDIUM")
+lst_bad = [ gql(USERS_ARCHIVED, token: u_tok), gql(USERS_ARCHIVED, token: other_tok), gql("{ users(archived: \"yes\") { items { id } } }", token: m_admin_tok) ]
+check("U18", "the archived filter: FORBIDDEN for a member (dead token is UNAUTHENTICATED), BAD_REQUEST for a bad literal, never a 500",
+      code(lst_bad[0]) == "UNAUTHENTICATED" && code(lst_bad[1]) == "FORBIDDEN" && code(lst_bad[2]) == "BAD_REQUEST" && lst_bad.all? { |x| clean?(x) }, lst_bad.map { |x| code(x) }.inspect, bad: "MEDIUM")
+
+res = 8.times.map { |i| Thread.new { i.even? ? archive(m_admin_tok, u_id) : unarchive(m_admin_tok, u_id) } }.map(&:value)
+check("U19", "parallel archive and unarchive of one user never give a 500", res.all? { |x| clean?(x) }, res.map { |x| code(x) || "ok" }.tally.inspect, bad: "MEDIUM")
+archive(m_admin_tok, u_id) # a known state again
+
+r = unarchive(m_admin_tok, u_id)
+check("U20", "a super_admin unarchives the member", arch_ok?(r, "unarchiveUser") && r[:json].dig("data", "unarchiveUser", "user", "archivedAt").nil? && arch_state(u_email)["archived"] == false, r[:body][0, 140], bad: "HIGH")
+check("U21", "the old token stays dead after unarchive (a new login is needed)", code(gql(ME, token: u_tok)) == "UNAUTHENTICATED", bad: "HIGH")
+back = login(u_email)
+check("U22", "the unarchived member logs in again with the same password", login_ok?(back), back[:body][0, 120], bad: "HIGH")
+end
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
