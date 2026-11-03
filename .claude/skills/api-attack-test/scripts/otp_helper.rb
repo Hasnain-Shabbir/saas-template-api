@@ -13,6 +13,7 @@
 #   login_expire make the user's login code expired
 #   make_admin    make the user a super_admin (the API has no way to do that, on purpose)
 #   archive_state print JSON: whether the user is archived, and how many tokens and codes they have
+#   revoke_state  print JSON: whether the user's access is revoked, whether archived, and how many tokens and codes they have
 #   inv_mint EMAIL ROLE  create an open invitation for EMAIL and print its plain token (the invitee's inbox). Test mode only:
 #                        production mode has another secret key, so its digests do not match
 #   inv_expire    make the open invitation of EMAIL expired
@@ -97,6 +98,8 @@ when "make_admin"
   user.update!(role: "super_admin")
 when "archive_state"
   print JSON.generate(archived: user.archived?, tokens: user.allowlisted_jwts.count, codes: OneTimeCode.where(user_id: user.id).count)
+when "revoke_state"
+  print JSON.generate(revoked: user.access_revoked?, archived: user.archived?, tokens: user.allowlisted_jwts.count, codes: OneTimeCode.where(user_id: user.id).count)
 when "ec_mint", "ec_mail"
   OneTimeCode.where(user_id: user.id, purpose: "email_change").delete_all
   user.update!(pending_email: ARGV[2])

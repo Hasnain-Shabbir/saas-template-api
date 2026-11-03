@@ -1333,6 +1333,98 @@ back = login(u_email)
 check("U22", "the unarchived member logs in again with the same password", login_ok?(back), back[:body][0, 120], bad: "HIGH")
 end
 
+# ---------- V. Revoke and grant access (super_admin only, never on a super_admin) ----------
+REVOKE = "mutation V($i: RevokeUserAccessInput!){ revokeUserAccess(input:$i){ user{ id accessRevokedAt archivedAt } errors{message path code} } }"
+GRANT = "mutation G($i: GrantUserAccessInput!){ grantUserAccess(input:$i){ user{ id accessRevokedAt } errors{message path code} } }"
+
+def revoke(token, id, extra = {}) = gql(REVOKE, variables: { i: { id: id }.merge(extra) }, token: token)
+def grant(token, id) = gql(GRANT, variables: { i: { id: id } }, token: token)
+def rev_ok?(r, op = "revokeUserAccess") = r[:json]&.dig("data", op, "errors") == [] && r[:json]&.dig("data", op, "user")
+def rev_state(email) = (JSON.parse(otp("revoke_state", email)) rescue {})
+
+v_email, v_tok, v_id = make_member
+_v_other_email, _v_other_tok, v_other_id = make_member
+
+none = [ revoke(nil, v_id), revoke("garbage", v_id), revoke(nil, v_id, { bogus: 1 }), grant(nil, v_id), grant("garbage", v_id) ]
+check("V1", "revokeUserAccess and grantUserAccess: no token or a garbage token is UNAUTHENTICATED, also with bad input",
+      none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+forbidden = [ revoke(v_tok, v_other_id), revoke(v_tok, SecureRandom.uuid), grant(v_tok, v_other_id), grant(v_tok, SecureRandom.uuid), revoke(v_tok, v_id) ]
+check("V2", "a member gets FORBIDDEN on both, for another member, an unknown id and themselves (no way to find out which ids exist)",
+      forbidden.all? { |x| code(x) == "FORBIDDEN" } && rev_state(v_email)["revoked"] == false, forbidden.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+if LABEL != "test"
+  rec("V3", "revoke scenarios that need a super_admin run in test mode only", "INFO")
+else
+r = revoke(m_admin_tok, u_admin_id)
+check("V3", "a super_admin cannot revoke themselves", code(r) == "FORBIDDEN" && rev_state(m_admin_email)["revoked"] == false, r[:body][0, 120], bad: "HIGH")
+r = revoke(m_admin_tok, u_admin2_id)
+check("V3b", "a super_admin cannot revoke another super_admin", code(r) == "FORBIDDEN" && rev_state(u_admin2_email)["revoked"] == false, r[:body][0, 120], bad: "HIGH")
+
+nf = [ revoke(m_admin_tok, SecureRandom.uuid), revoke(m_admin_tok, "' OR 1=1 --"), revoke(m_admin_tok, "x" * 5000), grant(m_admin_tok, SecureRandom.uuid) ]
+check("V4", "an unknown or hostile id is NOT_FOUND for a super_admin, never a 500", nf.all? { |x| clean?(x) && code(x) == "NOT_FOUND" }, nf.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "MEDIUM")
+
+mass = [ revoke(m_admin_tok, v_id, { accessRevokedAt: "2020-01-01" }), revoke(m_admin_tok, v_id, { role: "SUPER_ADMIN" }), revoke(m_admin_tok, v_id, { revokedById: u_admin_id }) ]
+check("V5", "extra input fields (accessRevokedAt, role, revokedById) are rejected by the schema, and nothing is revoked",
+      mass.all? { |x| x[:json]&.dig("errors") && clean?(x) } && rev_state(v_email)["revoked"] == false, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+otp("login_mint", v_email)
+r = revoke(m_admin_tok, v_id)
+check("V6", "a super_admin revokes a member, who is not archived by it",
+      rev_ok?(r) && r[:json].dig("data", "revokeUserAccess", "user", "accessRevokedAt") && r[:json].dig("data", "revokeUserAccess", "user", "archivedAt").nil? && rev_state(v_email)["archived"] == false, r[:body][0, 140], bad: "HIGH")
+check("V7", "the token of the revoked member is dead at once", code(gql(ME, token: v_tok)) == "UNAUTHENTICATED", gql(ME, token: v_tok)[:body][0, 100], bad: "CRITICAL")
+st = rev_state(v_email)
+check("V8", "revoke deleted every token and pending code of the member", st["revoked"] == true && st["tokens"] == 0 && st["codes"] == 0, st.inspect, bad: "HIGH")
+r2 = revoke(m_admin_tok, v_id)
+check("V9", "revoking twice is safe (success, no 500)", rev_ok?(r2) && clean?(r2), r2[:body][0, 120], bad: "MEDIUM")
+
+step1 = login_step1(v_email)
+check("V10", "right password: ACCESS_REVOKED, and no login code is created", step1[:json]&.dig("data", "login", "errors", 0, "code") == "ACCESS_REVOKED" &&
+      step1[:json]&.dig("data", "login", "success") != true && rev_state(v_email)["codes"] == 0, step1[:body][0, 140], bad: "HIGH")
+wrong_rev = login_step1(v_email, "wrong-password-x")
+wrong_unknown = login_step1(uniq, "wrong-password-x")
+check("V11", "wrong password on a revoked account looks like an unknown email (only the password holder learns it is revoked)",
+      wrong_rev[:json] == wrong_unknown[:json] && wrong_rev[:json]&.dig("data", "login", "errors", 0, "code") == "INVALID_CREDENTIALS", wrong_rev[:body][0, 120], bad: "HIGH")
+
+v = verify_login(v_email, otp("login_mint", v_email))
+check("V12", "step 2 with a valid login code of a revoked user: INVALID_CODE, no token", v[:json]&.dig("data", "verifyLoginCode", "token").nil? &&
+      v[:json]&.dig("data", "verifyLoginCode", "errors", 0, "code") == "INVALID_CODE", v[:body][0, 120], bad: "CRITICAL")
+
+codes_before = rev_state(v_email)["codes"] # V12 left its login code (a revoked user's code is not used up)
+req_rev = gql(RESET_REQ, variables: { i: { email: v_email } })
+req_unknown = gql(RESET_REQ, variables: { i: { email: uniq } })
+check("V13", "password reset request for a revoked user answers exactly like an unknown email, and no code is made",
+      req_rev[:json] == req_unknown[:json] && req_rev[:json]&.dig("data", "requestPasswordReset", "success") == true && rev_state(v_email)["codes"] == codes_before, req_rev[:body][0, 120], bad: "HIGH")
+
+# An own user: a reset that works would change the password the later checks use.
+rr_email, _rr_tok, rr_id = make_member
+revoke(m_admin_tok, rr_id)
+rd = gql(RESET_DO, variables: { i: { email: rr_email, code: otp("mint", rr_email), password: "An0ther-Str0ng-Pass!" } })
+check("V14", "resetPassword with a valid code does not work for a revoked user",
+      rd[:json]&.dig("data", "resetPassword", "success") != true && rev_state(rr_email)["revoked"] == true, rd[:body][0, 140], bad: "MEDIUM")
+
+lst = gql(USERS_ACTIVE, token: m_admin_tok)
+check("V15", "the revoked member stays in the default users list, with the time", lst[:json]&.dig("data", "users", "items")&.any? { |x| x["id"] == v_id }, lst[:body][0, 100], bad: "MEDIUM")
+
+res = 8.times.map { |i| Thread.new { i.even? ? revoke(m_admin_tok, v_id) : grant(m_admin_tok, v_id) } }.map(&:value)
+check("V16", "parallel revoke and grant of one user never give a 500", res.all? { |x| clean?(x) }, res.map { |x| code(x) || "ok" }.tally.inspect, bad: "MEDIUM")
+revoke(m_admin_tok, v_id) # a known state again
+
+archive(m_admin_tok, v_id)
+r = grant(m_admin_tok, v_id)
+check("V17", "grant does not unarchive: an archived member stays archived and still cannot log in",
+      rev_ok?(r, "grantUserAccess") && rev_state(v_email)["archived"] == true && rev_state(v_email)["revoked"] == false &&
+      login_step1(v_email)[:json]&.dig("data", "login", "errors", 0, "code") == "ACCOUNT_ARCHIVED", r[:body][0, 140], bad: "HIGH")
+unarchive(m_admin_tok, v_id)
+
+revoke(m_admin_tok, v_id)
+r = grant(m_admin_tok, v_id)
+check("V18", "a super_admin grants the access back", rev_ok?(r, "grantUserAccess") && r[:json].dig("data", "grantUserAccess", "user", "accessRevokedAt").nil? && rev_state(v_email)["revoked"] == false, r[:body][0, 140], bad: "HIGH")
+check("V19", "the old token stays dead after grant (a new login is needed)", code(gql(ME, token: v_tok)) == "UNAUTHENTICATED", bad: "HIGH")
+back = login(v_email)
+check("V20", "the member logs in again with the same password", login_ok?(back), back[:body][0, 120], bad: "HIGH")
+end
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
