@@ -7,8 +7,9 @@ module Auth
       # Always run bcrypt, so a locked or unknown account takes as long as a real check.
       password_ok = user ? user.valid_password?(password) : dummy_check(password)
 
-      # Only a caller who knows the password learns that the account is archived (so they can ask an administrator).
+      # Only a caller who knows the password learns that the account is archived or revoked (so they can ask an administrator).
       return Errors.failure(Errors::ACCOUNT_ARCHIVED) if password_ok && user.archived?
+      return Errors.failure(Errors::ACCESS_REVOKED) if password_ok && user.access_revoked?
 
       if user&.valid_for_authentication? { password_ok } && user.active_for_authentication?
         # The job gets the id only: the code is made inside it. The failed attempts stay counted until a code is verified.

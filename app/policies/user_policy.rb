@@ -10,6 +10,12 @@ class UserPolicy < ApplicationPolicy
 
   def unarchive? = archive?
 
+  # Revoke and grant access: only a super_admin, on any role except a super_admin (so never on themselves or another super_admin).
+  # Written as "not a super_admin", so a role added later can be revoked without a change here.
+  def revoke_access? = user.present? && user.super_admin? && !record.super_admin?
+
+  def grant_access? = revoke_access?
+
   def show? = self?
 
   def logout? = self?

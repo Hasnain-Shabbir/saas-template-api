@@ -3,7 +3,7 @@ module Auth
     def self.call(email:, code:, password:)
       User.transaction do
         user = User.find_for_database_authentication(email: email)
-        user = nil if user&.archived? # an archived user is treated like an unknown email, even if a code was issued just before the archive
+        user = nil if user&.blocked? # an archived or revoked user is treated like an unknown email, even if a code was issued just before
         verified = VerifyOneTimeCode.call(user:, purpose: :password_reset, code:)
         next verified if verified.failure?
 

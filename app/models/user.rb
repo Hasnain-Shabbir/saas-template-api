@@ -9,7 +9,7 @@ class User < ApplicationRecord
   # Audit log: names of changed fields only. Values are stored just for the fields listed here (none is personal or a secret).
   # `failed_attempts` alone does not make a row (a wrong password would write one each time); the lock itself (`locked_at`) does.
   include Auditable
-  audited values: %i[role locked_at archived_at terms_version terms_accepted_at], ignore: %i[failed_attempts]
+  audited values: %i[role locked_at archived_at access_revoked_at terms_version terms_accepted_at], ignore: %i[failed_attempts]
 
   # The one place roles are defined. A new role is added here and in a migration that changes the
   # `users_role_values` CHECK constraint. Permissions of a role live in the policies, not here.
@@ -72,8 +72,14 @@ class User < ApplicationRecord
 
   def archived? = archived_at.present?
 
-  # Devise asks this on every login and every authenticated request, so an archived user is refused everywhere.
-  def active_for_authentication? = super && !archived?
+  # An admin took the access away (see `Users::RevokeAccess`). Separate from archive: the user stays in the normal list.
+  def access_revoked? = access_revoked_at.present?
+
+  # Archived or revoked: no login, no token, no reset.
+  def blocked? = archived? || access_revoked?
+
+  # Devise asks this on every login and every authenticated request, so a blocked user is refused everywhere.
+  def active_for_authentication? = super && !blocked?
 
   def profile_complete? = PROFILE_FIELDS.all? { |field| self[field].present? }
 

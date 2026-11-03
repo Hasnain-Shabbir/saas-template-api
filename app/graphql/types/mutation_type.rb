@@ -16,6 +16,8 @@ module Types
     field :resend_invitation, mutation: Mutations::Invitations::ResendInvitation
     field :archive_user, mutation: Mutations::Users::ArchiveUser
     field :unarchive_user, mutation: Mutations::Users::UnarchiveUser
+    field :revoke_user_access, mutation: Mutations::Users::RevokeUserAccess
+    field :grant_user_access, mutation: Mutations::Users::GrantUserAccess
     field :update_profile, mutation: Mutations::Profiles::UpdateProfile
     field :update_address, mutation: Mutations::Addresses::UpdateAddress
     field :accept_terms, mutation: Mutations::Terms::AcceptTerms

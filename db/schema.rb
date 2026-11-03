@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_110001) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -143,6 +143,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_110001) do
     t.string "terms_version"
     t.datetime "terms_accepted_at"
     t.datetime "archived_at"
+    t.datetime "access_revoked_at"
     t.index "lower((email)::text) gin_trgm_ops", name: "index_users_on_email_trgm", using: :gin
     t.index "lower((first_name)::text) gin_trgm_ops", name: "index_users_on_first_name_trgm", using: :gin
     t.index "lower((last_name)::text) gin_trgm_ops", name: "index_users_on_last_name_trgm", using: :gin
