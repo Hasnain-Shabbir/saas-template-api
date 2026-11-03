@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_02_100001) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_02_110001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -142,9 +142,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_02_100001) do
     t.string "country"
     t.string "terms_version"
     t.datetime "terms_accepted_at"
+    t.datetime "archived_at"
     t.index "lower((email)::text) gin_trgm_ops", name: "index_users_on_email_trgm", using: :gin
     t.index "lower((first_name)::text) gin_trgm_ops", name: "index_users_on_first_name_trgm", using: :gin
     t.index "lower((last_name)::text) gin_trgm_ops", name: "index_users_on_last_name_trgm", using: :gin
+    t.index ["archived_at"], name: "index_users_on_archived_at", where: "(archived_at IS NOT NULL)"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.check_constraint "address_line_1 IS NULL OR char_length(address_line_1::text) >= 1 AND char_length(address_line_1::text) <= 100", name: "users_address_line_1_length"
     t.check_constraint "address_line_2 IS NULL OR char_length(address_line_2::text) >= 1 AND char_length(address_line_2::text) <= 100", name: "users_address_line_2_length"

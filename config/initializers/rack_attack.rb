@@ -8,7 +8,9 @@ class Rack::Attack
   EMAIL_CHANGE_OPERATIONS = %w[requestEmailChange confirmEmailChange].freeze
   # Logged-in mutations that send an invitation email or look one up by address. Limited per IP like the email change.
   INVITATION_OPERATIONS = %w[inviteUser resendInvitation revokeInvitation].freeze
-  MAX_BODY_BYTES = 100 * 1024
+  # Logged-in mutations that block or restore a user. Limited per IP like the invitations (a stolen admin token could lock out many users).
+  ARCHIVE_OPERATIONS = %w[archiveUser unarchiveUser].freeze
+  MAX_BODY_BYTES =100 * 1024
 
   # Parse the GraphQL POST body once per request and remember it in the Rack env.
   def self.graphql_params(req)
@@ -47,6 +49,10 @@ class Rack::Attack
     field_names(req).select { |name| INVITATION_OPERATIONS.include?(name) }
   end
 
+  def self.archive_operations(req)
+    field_names(req).select { |name| ARCHIVE_OPERATIONS.include?(name) }
+  end
+
   def self.collect_field_names(node)
     own = node.is_a?(GraphQL::Language::Nodes::Field) ? [ node.name ] : []
     own + node.children.flat_map { |child| collect_field_names(child) }
@@ -62,6 +68,9 @@ class Rack::Attack
 
   # Aliases would multiply invitation emails.
   blocklist("graphql/batched-invitation-operations") { |req| invitation_operations(req).size > 1 }
+
+  # Aliases would archive many users in one request.
+  blocklist("graphql/batched-archive-operations") { |req| archive_operations(req).size > 1 }
 
   # Per IP, for every public mutation.
   throttle("public-operations/ip", limit: 10, period: 1.minute) do |req|
@@ -86,6 +95,11 @@ class Rack::Attack
   # Per IP, invitation mail abuse (for example with a stolen admin token).
   throttle("invitations/ip", limit: 30, period: 1.hour) do |req|
     req.ip if invitation_operations(req).any?
+  end
+
+  # Per IP, blocking and restoring users (for example with a stolen admin token).
+  throttle("archive/ip", limit: 30, period: 1.hour) do |req|
+    req.ip if archive_operations(req).any?
   end
 
   self.blocklisted_responder = lambda do |_req|

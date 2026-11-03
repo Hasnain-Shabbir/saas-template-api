@@ -9,6 +9,8 @@ module Queries
       argument :created_from, GraphQL::Types::ISO8601Date, required: false, description: "Only users created from this day on (included)"
       argument :created_to, GraphQL::Types::ISO8601Date, required: false, description: "Only users created up to this day (included)"
       argument :search, String, required: false, description: "Part of the email, first name or last name, in any letter case"
+      argument :archived, Boolean, required: false,
+               description: "True lists only archived users. False or empty lists only active users (archived users are hidden by default)"
       argument :page, Integer, required: false, description: "Page number, starting at 1. A lower number is read as 1"
       argument :per_page, Integer, required: false,
                description: "Users per page. #{ValidationRules::PAGE_SIZE_DEFAULT} when empty, at most #{ValidationRules::PAGE_SIZE_MAX}"

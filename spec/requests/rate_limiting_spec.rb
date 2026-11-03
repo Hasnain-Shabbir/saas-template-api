@@ -173,6 +173,42 @@ RSpec.describe "Rate limiting and request guards", type: :request do
     end
   end
 
+  describe "archive operations" do
+    let(:admin) { create(:user, :super_admin) }
+    let(:token) { token_for(admin) }
+    let(:member) { create(:user) }
+    let(:archive) { "mutation($input: ArchiveUserInput!) { archiveUser(input: $input) { errors { code } } }" }
+    let(:unarchive) { "mutation($input: UnarchiveUserInput!) { unarchiveUser(input: $input) { errors { code } } }" }
+
+    it "allows 30 per hour per IP, across both operations, then answers 429 RATE_LIMITED with retry-after" do
+      30.times { gql(archive, variables: { input: { id: member.id } }, token:) }
+      expect(response).to have_http_status(:ok)
+
+      gql(unarchive, variables: { input: { id: member.id } }, token:)
+
+      expect_error(:too_many_requests, :RATE_LIMITED)
+      expect(response.headers["retry-after"]).to eq("3600")
+    end
+
+    it "does not count other operations" do
+      31.times { gql("{ me { id } }", token:) }
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "blocks several in one request (aliases) and archives nobody" do
+      gql("mutation { a: archiveUser(input: { id: \"#{member.id}\" }) { errors { code } } b: unarchiveUser(input: { id: \"#{member.id}\" }) { errors { code } } }", token:)
+
+      expect_error(:bad_request, :BAD_REQUEST)
+      expect(member.reload).not_to be_archived
+    end
+
+    it "lists every logged-in mutation that blocks or restores a user" do
+      expect(Rack::Attack::ARCHIVE_OPERATIONS).to match_array(%w[archiveUser unarchiveUser])
+      expect(Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }).to include(*Rack::Attack::ARCHIVE_OPERATIONS)
+    end
+  end
+
   describe "batching" do
     it "blocks several public operations in one request (aliases)" do
       gql("mutation { a: login(input: { email: \"a@example.test\", password: \"x\" }) { success } b: login(input: { email: \"a@example.test\", password: \"y\" }) { success } }")

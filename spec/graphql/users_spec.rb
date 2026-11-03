@@ -63,6 +63,18 @@ RSpec.describe "Users list query", type: :request do
       expect(ids(gql(list, variables: { search: "LOVEL" }, token:))).to eq([ ada.id ])
     end
 
+    it "hides archived users by default, and lists only them when asked" do
+      Users::Archive.call(user: ada)
+      token = token_for(admin)
+
+      expect(ids(gql(list, token:))).to eq([ member.id ])
+      expect(ids(gql(list, variables: { archived: false }, token:))).to eq([ member.id ])
+      body = gql("query { users(archived: true) { totalCount items { id archivedAt } } }", token:)
+      expect(body.dig("data", "users", "items").pluck("id")).to eq([ ada.id ])
+      expect(body.dig("data", "users", "items", 0, "archivedAt")).to be_present
+      expect(body.dig("data", "users", "totalCount")).to eq(1)
+    end
+
     it "pages the result and lowers a size that is too big" do
       token = token_for(admin)
 

@@ -10,6 +10,7 @@ module Types
     field :last_name, String, null: true, description: "Last name. Empty until the profile is saved"
     field :role, Types::UserRoleEnum, null: false, description: "The role of the user"
     field :locked, Boolean, null: false, description: "True when the account is locked after too many wrong passwords"
+    field :archived_at, GraphQL::Types::ISO8601DateTime, null: true, description: "When the user was archived. Empty for an active user"
     field :onboarding_completed, Boolean, null: false, description: "True when the user has no onboarding step left. Also true for a role that has no steps"
     field :created_at, GraphQL::Types::ISO8601DateTime, null: false, description: "When the user was created"
 
