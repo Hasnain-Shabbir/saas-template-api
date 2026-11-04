@@ -14,6 +14,10 @@
 #   make_admin    make the user a super_admin (the API has no way to do that, on purpose)
 #   archive_state print JSON: whether the user is archived, and how many tokens and codes they have
 #   revoke_state  print JSON: whether the user's access is revoked, whether archived, and how many tokens and codes they have
+#   imp_state     print JSON: the impersonation sessions of the user (as admin or as member): how many, how many are open, why the last one ended (and the count per reason),
+#                 its jti, the audit and read audit rows linked to them (and who they name), and the user's id and token count
+#   imp_expire    make the user's open impersonation sessions run out in the database (the signed token itself still verifies)
+#   imp_relist    put the allowlist row of the user's last impersonation session back (a leftover token of an ended session)
 #   inv_mint EMAIL ROLE  create an open invitation for EMAIL and print its plain token (the invitee's inbox). Test mode only:
 #                        production mode has another secret key, so its digests do not match
 #   inv_expire    make the open invitation of EMAIL expired
@@ -100,6 +104,21 @@ when "archive_state"
   print JSON.generate(archived: user.archived?, tokens: user.allowlisted_jwts.count, codes: OneTimeCode.where(user_id: user.id).count)
 when "revoke_state"
   print JSON.generate(revoked: user.access_revoked?, archived: user.archived?, tokens: user.allowlisted_jwts.count, codes: OneTimeCode.where(user_id: user.id).count)
+when "imp_state", "imp_expire", "imp_relist"
+  mine = Impersonation.where(impersonator_id: user.id).or(Impersonation.where(target_id: user.id))
+  last = mine.order(:started_at).last
+  case action
+  when "imp_state"
+    linked = mine.select(:id)
+    print JSON.generate(sessions: mine.count, open: mine.unended.count, last_reason: last&.ended_reason, reasons: mine.where.not(ended_reason: nil).group(:ended_reason).count, last_ended: !last&.ended_at.nil?, jti: last&.jti,
+                        audit_rows: AuditVersion.where(impersonation_id: linked).count, audit_actors: AuditVersion.where(impersonation_id: linked).distinct.pluck(:whodunnit),
+                        read_rows: ReadAudit.where(impersonation_id: linked).count, read_readers: ReadAudit.where(impersonation_id: linked).distinct.pluck(:reader),
+                        tokens: user.allowlisted_jwts.count, user_id: user.id)
+  when "imp_expire"
+    mine.unended.update_all(started_at: 31.minutes.ago, expires_at: 1.minute.ago)
+  when "imp_relist"
+    AllowlistedJwt.create!(user_id: last.target_id, jti: last.jti, exp: 30.minutes.from_now)
+  end
 when "ec_mint", "ec_mail"
   OneTimeCode.where(user_id: user.id, purpose: "email_change").delete_all
   user.update!(pending_email: ARGV[2])

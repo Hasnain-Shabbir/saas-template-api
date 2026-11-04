@@ -8,6 +8,7 @@ require "json"
 require "jwt"
 require "securerandom"
 require "base64"
+require "time"
 
 BASE = ARGV[0] || "http://127.0.0.1:4001"
 LABEL = ARGV[1] || "test"
@@ -1425,6 +1426,181 @@ back = login(v_email)
 check("V20", "the member logs in again with the same password", login_ok?(back), back[:body][0, 120], bad: "HIGH")
 end
 
+# ---------- W. Impersonation (super_admin only, members only, 30 minutes, audited) ----------
+IMP_START = "mutation I($i: StartImpersonationInput!){ startImpersonation(input:$i){ token impersonation{ id reasonCategory reason startedAt expiresAt target{ id email } } errors{message path code} } }"
+IMP_STOP = "mutation { stopImpersonation(input:{}){ success errors{message path code} } }"
+
+def imp_start(token, id, category = "SUPPORT_REQUEST", extra = {}) = gql(IMP_START, variables: { i: { userId: id, reasonCategory: category }.merge(extra) }, token: token)
+def imp_tok(r) = r[:json]&.dig("data", "startImpersonation", "token")
+def imp_err(r) = r[:json]&.dig("data", "startImpersonation", "errors", 0, "code")
+def imp_state(email) = (JSON.parse(otp("imp_state", email)) rescue {})
+def me_id(token) = gql(ME, token: token)[:json]&.dig("data", "me", "id")
+def dead?(token) = code(gql(ME, token: token)) == "UNAUTHENTICATED"
+
+def make_admin_user
+  email = uniq
+  r = signup(email)
+  otp("make_admin", email) # the role is read from the database on each request, so the signUp token is an admin token now
+  [ email, tok_of(r), r[:json]&.dig("data", "signUp", "user", "id") ]
+end
+
+if LABEL != "test"
+  rec("W1", "impersonation scenarios need a super_admin, and only the test database can make one: test mode only", "INFO")
+else
+  w_admin_email, w_admin_tok, w_admin_id = make_admin_user
+  w_target_email, w_target_tok, w_target_id = make_member
+  w_other_email, w_other_tok, w_other_id = make_member
+
+  none = [ imp_start(nil, w_target_id), imp_start("garbage", w_target_id), imp_start(nil, w_target_id, "NOPE", { bogus: 1 }), gql(IMP_STOP), gql(IMP_STOP, token: "garbage") ]
+  check("W1", "startImpersonation and stopImpersonation: no token or a garbage token is UNAUTHENTICATED, also with bad input",
+        none.all? { |x| code(x) == "UNAUTHENTICATED" }, none.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+  tokens_before = imp_state(w_target_email)["tokens"]
+  forbidden = [ imp_start(w_target_tok, w_other_id), imp_start(w_target_tok, SecureRandom.uuid), imp_start(w_target_tok, w_target_id) ]
+  check("W2", "a member gets FORBIDDEN on startImpersonation, for another member, an unknown id and themselves, and no session exists",
+        forbidden.all? { |x| code(x) == "FORBIDDEN" } && imp_state(w_target_email)["sessions"] == 0 && imp_state(w_target_email)["tokens"] == tokens_before,
+        forbidden.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "CRITICAL")
+
+  r = imp_start(w_admin_tok, w_admin_id)
+  check("W3", "a super_admin cannot impersonate themselves (an error that says why)", imp_err(r) == "FORBIDDEN" && imp_state(w_admin_email)["sessions"] == 0, r[:body][0, 140], bad: "HIGH")
+  other_admin_email, _other_admin_tok, other_admin_id = make_admin_user
+  r = imp_start(w_admin_tok, other_admin_id)
+  check("W3b", "a super_admin cannot impersonate another super_admin", imp_err(r) == "FORBIDDEN" && imp_state(other_admin_email)["sessions"] == 0, r[:body][0, 140], bad: "CRITICAL")
+
+  nf = [ imp_start(w_admin_tok, SecureRandom.uuid), imp_start(w_admin_tok, "' OR 1=1 --"), imp_start(w_admin_tok, "x" * 5000) ]
+  check("W4", "an unknown or hostile id is NOT_FOUND for a super_admin, never a 500", nf.all? { |x| clean?(x) && code(x) == "NOT_FOUND" }, nf.map { |x| x[:body][0, 70] }.uniq.inspect, bad: "MEDIUM")
+
+  mass = [ { expiresAt: "2099-01-01T00:00:00Z" }, { jti: "x" }, { impersonatorId: w_other_id }, { endedAt: "2020-01-01T00:00:00Z" }, { ttl: 99_999 } ].map { |extra| imp_start(w_admin_tok, w_target_id, "SUPPORT_REQUEST", extra) }
+  check("W5", "extra input fields (expiresAt, jti, impersonatorId, endedAt, ttl) are rejected by the schema, and no session exists",
+        mass.all? { |x| x[:json]&.dig("errors") && clean?(x) } && imp_state(w_admin_email)["sessions"] == 0, mass.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+  bad_input = [ imp_start(w_admin_tok, w_target_id, "OTHER"), imp_start(w_admin_tok, w_target_id, "OTHER", { reason: "   " }),
+                imp_start(w_admin_tok, w_target_id, "SUPPORT_REQUEST", { reason: "a" * 501 }), imp_start(w_admin_tok, w_target_id, "FUN") ]
+  check("W6", "OTHER needs a note, a blank or 501 character note and an unknown category are refused, no session, no token",
+        bad_input[0..2].all? { |x| imp_err(x) == "VALIDATION_FAILED" && imp_tok(x).nil? } && bad_input[3][:json]&.dig("errors") && imp_state(w_admin_email)["sessions"] == 0 && imp_state(w_target_email)["tokens"] == tokens_before,
+        bad_input.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "HIGH")
+
+  hostile = imp_start(w_admin_tok, w_target_id, "OTHER", { reason: "<script>alert(1)</script> ' OR 1=1 -- ${7*7}" })
+  check("W6b", "a hostile note is stored as text and never a 500", clean?(hostile) && !imp_tok(hostile).nil?, hostile[:body][0, 120], bad: "MEDIUM")
+  gql(IMP_STOP, token: imp_tok(hostile))
+
+  w_own = w_admin_tok
+  r = imp_start(w_admin_tok, w_target_id)
+  w_imp = imp_tok(r)
+  st = imp_state(w_admin_email)
+  check("W7", "a super_admin starts a session: a token, the member, the category, and 30 minutes",
+        !w_imp.nil? && r[:json].dig("data", "startImpersonation", "impersonation", "target", "id") == w_target_id &&
+        (Time.parse(r[:json].dig("data", "startImpersonation", "impersonation", "expiresAt")) - Time.parse(r[:json].dig("data", "startImpersonation", "impersonation", "startedAt")) - 1800).abs < 2 && st["open"] == 1,
+        r[:body][0, 200], bad: "HIGH")
+  check("W7b", "the impersonation token acts as the member, and the admin's own token still acts as the admin", me_id(w_imp) == w_target_id && me_id(w_own) == w_admin_id, "", bad: "HIGH")
+  check("W7c", "the response holds no password hash and no personal data of the member", !r[:body].match?(/password|phone|dateOfBirth|addressLine/i), r[:body][0, 200], bad: "HIGH")
+
+  banner = gql("{ me { id impersonation { id reasonCategory expiresAt target { id } } } }", token: w_imp)
+  check("W7d", "me { impersonation } tells the frontend about the running session (for the banner), and is empty for the member's own token and the admin's own token",
+        banner[:json]&.dig("data", "me", "impersonation", "target", "id") == w_target_id &&
+        gql("{ me { impersonation { id } } }", token: w_target_tok)[:json]&.dig("data", "me", "impersonation").nil? &&
+        gql("{ me { impersonation { id } } }", token: w_own)[:json]&.dig("data", "me", "impersonation").nil?, banner[:body][0, 160], bad: "MEDIUM")
+
+  state_before = [ otp("role", w_target_email), ec_state(w_target_email)["pending"], ec_state(w_target_email)["email"] ]
+  blocked = {
+    "requestEmailChange" => "mutation { requestEmailChange(input:{ newEmail:\"#{uniq}\", password:\"#{PW}\" }){ success } }",
+    "acceptTerms" => "mutation { acceptTerms(input:{ version:\"x\" }){ errors{code} } }",
+    "resetPassword" => "mutation { resetPassword(input:{ email:\"#{w_target_email}\", code:\"123456\", password:\"#{NEW_PW}\" }){ success } }",
+    "requestPasswordReset" => "mutation { requestPasswordReset(input:{ email:\"#{w_target_email}\" }){ success } }",
+    "login" => "mutation { login(input:{ email:\"#{w_target_email}\", password:\"#{PW}\" }){ success } }",
+    "startImpersonation" => "mutation { startImpersonation(input:{ userId:\"#{w_other_id}\", reasonCategory: SUPPORT_REQUEST }){ token } }",
+    "archiveUser" => "mutation { archiveUser(input:{ id:\"#{w_other_id}\" }){ user{ id } } }",
+    "inviteUser" => "mutation { inviteUser(input:{ email:\"#{uniq}\", role: MEMBER }){ success } }"
+  }
+  res = blocked.map { |name, q| [ name, gql(q, token: w_imp) ] }
+  check("W8", "with an impersonation token, every mutation outside the allowed list is FORBIDDEN with a message that says why, and returns no data",
+        res.all? { |_, x| code(x) == "FORBIDDEN" && x[:json].dig("errors", 0, "message").to_s.include?("impersonating") && x[:json]["data"].nil? }, res.map { |n, x| "#{n}: #{x[:body][0, 50]}" }.join(" | "), bad: "CRITICAL")
+  check("W8b", "the blocked mutations changed nothing on the member (role, pending email, email)", [ otp("role", w_target_email), ec_state(w_target_email)["pending"], ec_state(w_target_email)["email"] ] == state_before, "", bad: "CRITICAL")
+  check("W8c", "the blocked mutations did not touch the other member", otp("role", w_other_email) == "member" && arch_state(w_other_email)["archived"] == false, "", bad: "CRITICAL")
+  own_terms = gql(blocked["acceptTerms"], token: w_target_tok)
+  check("W8d", "the same mutation with the member's own token is not stopped by the impersonation gate", !own_terms[:body].include?("impersonating"), own_terms[:body][0, 120], bad: "MEDIUM")
+
+  pr = prof_save(w_imp, { lastName: "Imp" })
+  check("W9", "an impersonator may save the member's profile (support work)", op_errs(pr, "updateProfile") == [] && me_profile(w_target_tok)&.dig("lastName") == "Imp", pr[:body][0, 140], bad: "MEDIUM")
+  st = imp_state(w_admin_email)
+  check("W9b", "the change is in the audit log under the ADMIN's id, linked to the session",
+        st["audit_rows"].to_i >= 1 && st["audit_actors"] == [ w_admin_id ], st.slice("audit_rows", "audit_actors").inspect, bad: "HIGH")
+  gql("{ me { phone dateOfBirth city } }", token: w_imp)
+  st = imp_state(w_admin_email)
+  check("W10", "reading the member's sensitive fields while impersonating is in the read audit log under the admin, linked to the session",
+        st["read_rows"].to_i >= 1 && st["read_readers"] == [ w_admin_id ], st.slice("read_rows", "read_readers").inspect, bad: "HIGH")
+  reads_before = imp_state(w_admin_email)["read_rows"]
+  gql("{ me { phone } }", token: w_target_tok)
+  check("W10b", "the member reading their own data in a normal request adds no read audit row", imp_state(w_admin_email)["read_rows"] == reads_before, "", bad: "MEDIUM")
+
+  jti = st["jti"]
+  claims = { "sub" => w_target_id, "scp" => "user", "aud" => nil, "iat" => Time.now.to_i, "exp" => Time.now.to_i + 600, "jti" => jti }
+  parts = w_imp.split(".")
+  real = JSON.parse(Base64.urlsafe_decode64(parts[1] + "=" * ((4 - parts[1].size % 4) % 4)))
+  forged = [ "#{b64({ alg: 'none', typ: 'JWT' })}.#{b64(claims)}.", JWT.encode(claims, "attacker-secret", "HS256"), [ parts[0], b64(real.merge("sub" => w_admin_id)), parts[2] ].join("."),
+             [ parts[0], b64(real.merge("exp" => Time.now.to_i + 999_999)), parts[2] ].join(".") ]
+  fr = forged.map { |t| gql(ME, token: t) }
+  check("W11", "forged tokens naming a real session (alg=none, wrong secret, sub swapped to the admin, exp extended) never get in",
+        fr.all? { |x| x[:json]&.dig("data", "me").nil? && clean?(x) }, fr.map { |x| x[:body][0, 60] }.uniq.inspect, bad: "CRITICAL")
+
+  # A second device: a new session ends the first and kills its token. The admin's own token stays.
+  r2 = imp_start(w_admin_tok, w_other_id)
+  w_imp2 = imp_tok(r2)
+  st = imp_state(w_admin_email)
+  check("W12", "a new session ends the old one: the first token is dead, the second works, one session is open",
+        dead?(w_imp) && me_id(w_imp2) == w_other_id && st["open"] == 1 && me_id(w_own) == w_admin_id, st.inspect, bad: "HIGH")
+
+  w_second_email, w_second_tok, _w_second_id = make_admin_user
+  w_imp2b = imp_tok(imp_start(w_second_tok, w_other_id))
+  check("W12b", "two admins may impersonate the same member at once, and one stopping does not end the other's session",
+        !w_imp2b.nil? && me_id(w_imp2) == w_other_id && me_id(w_imp2b) == w_other_id &&
+        (gql(IMP_STOP, token: w_imp2b); me_id(w_imp2) == w_other_id && dead?(w_imp2b)) && imp_state(w_second_email)["open"] == 0, imp_state(w_admin_email).inspect, bad: "MEDIUM")
+
+  gql(IMP_STOP, token: w_imp2)
+  check("W13", "stopImpersonation ends the session, kills its token, records it as stopped, and keeps the admin's own token",
+        dead?(w_imp2) && me_id(w_own) == w_admin_id && imp_state(w_admin_email)["last_reason"] == "stopped" && imp_state(w_admin_email)["open"] == 0, imp_state(w_admin_email).inspect, bad: "HIGH")
+  otp("imp_relist", w_admin_email)
+  check("W14", "a leftover token of an ended session (its allowlist row put back) is refused, never taken for a plain login of the member", dead?(w_imp2), gql(ME, token: w_imp2)[:body][0, 100], bad: "CRITICAL")
+
+  w_imp3 = imp_tok(imp_start(w_admin_tok, w_target_id))
+  nr = gql(IMP_STOP, token: w_admin_tok)
+  check("W15", "stopImpersonation with a normal token is NOT_IMPERSONATING and ends nobody's session",
+        nr[:json]&.dig("data", "stopImpersonation", "errors", 0, "code") == "NOT_IMPERSONATING" && imp_state(w_admin_email)["open"] == 1, nr[:body][0, 140], bad: "MEDIUM")
+  lo = gql(LOGOUT, token: w_imp3)
+  check("W16", "logout with an impersonation token ends only the impersonation: the admin stays logged in",
+        lo[:json]&.dig("data", "logout", "success") == true && dead?(w_imp3) && me_id(w_own) == w_admin_id && imp_state(w_admin_email)["last_reason"] == "stopped", lo[:body][0, 120], bad: "HIGH")
+
+  w_imp4 = imp_tok(imp_start(w_admin_tok, w_target_id))
+  otp("imp_expire", w_admin_email)
+  check("W17", "a session that ran out in the database is refused, although the token still verifies", dead?(w_imp4), gql(ME, token: w_imp4)[:body][0, 100], bad: "CRITICAL")
+  w_imp5 = imp_tok(imp_start(w_admin_tok, w_target_id))
+  check("W17b", "the admin can start again, and the session that ran out is recorded as expired",
+        !w_imp5.nil? && me_id(w_imp5) == w_target_id && imp_state(w_admin_email)["reasons"].to_h["expired"].to_i >= 1, imp_state(w_admin_email).inspect, bad: "MEDIUM")
+  gql(IMP_STOP, token: w_imp5)
+
+  w_imp6 = imp_tok(imp_start(w_admin_tok, w_target_id))
+  archive(m_admin_tok, w_target_id)
+  check("W18", "archiving the member ends the session at once (ended_by_system) and kills the token",
+        dead?(w_imp6) && imp_state(w_admin_email)["last_reason"] == "ended_by_system" && imp_state(w_admin_email)["open"] == 0, imp_state(w_admin_email).inspect, bad: "HIGH")
+  r = imp_start(w_admin_tok, w_target_id)
+  check("W18b", "an archived member cannot be impersonated", imp_err(r) == "FORBIDDEN" && imp_tok(r).nil?, r[:body][0, 140], bad: "HIGH")
+  unarchive(m_admin_tok, w_target_id)
+
+  w3_email, w3_tok, _w3_id = make_admin_user
+  w3_imp = imp_tok(imp_start(w3_tok, w_other_id))
+  do_reset(w3_email, otp("mint", w3_email))
+  check("W19", "an admin password reset ends their session and kills their tokens", dead?(w3_imp) && dead?(w3_tok) && imp_state(w3_email)["open"] == 0, imp_state(w3_email).inspect, bad: "HIGH")
+
+  w4_email, w4_tok, _w4_id = make_admin_user
+  res = 8.times.map { Thread.new { imp_start(w4_tok, w_other_id) } }.map(&:value)
+  st = imp_state(w4_email)
+  check("W20", "parallel starts by one admin never give a 500 and leave exactly one open session", res.all? { |x| clean?(x) } && st["open"] == 1, "#{res.map { |x| imp_err(x) || 'ok' }.tally} #{st.slice('open', 'sessions')}", bad: "HIGH")
+
+  batch = gql("mutation { a: startImpersonation(input:{ userId:\"#{w_other_id}\", reasonCategory: SUPPORT_REQUEST }){ token } b: startImpersonation(input:{ userId:\"#{w_other_id}\", reasonCategory: SUPPORT_REQUEST }){ token } }", token: w_admin_tok)
+  check("W21", "several startImpersonation in one request (aliases) are refused", batch[:status] == 400 && batch[:json]&.dig("errors", 0, "extensions", "code") == "BAD_REQUEST", batch[:body][0, 120], bad: "MEDIUM")
+  rec("W23", "not covered here: the 10 per hour rate limit of startImpersonation (a spec covers it; the admin token is test mode only) and the email notice (none is sent, by decision)", "INFO")
+end
+
 # ---------- Z. Schema-driven phase (every operation, including ones added later) ----------
 if LABEL == "test"
   frag = "fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } }"
@@ -1587,11 +1763,14 @@ if audit_json.empty?
   rec("AUD1", "audit log check needs the database helper (test mode only)", "INFO")
 else
   audit_rows = (JSON.parse(audit_json) rescue [])
-  audit_text = audit_json
+  # Ids (id, item_id, whodunnit, request_id, impersonation_id) are random UUIDs. With thousands of rows one of them can hold a short
+  # digit run by luck (the 5 digit ZIP code: about 1 run in 9). They are cut out before the search. A leaked value is never UUID-shaped.
+  audit_text = audit_json.gsub(/\h{8}-\h{4}-\h{4}-\h{4}-\h{12}/, "<uuid>")
   leaks = [ PW, NEW_PW, "$2a$", "$2b$", "eyJ", "Bearer ", "@example.test", PROFILE[:lastName], PROFILE[:dateOfBirth], "4155552671",
             ADDRESS[:addressLine1], ADDRESS[:city], ADDRESS[:postalCode] ].select { |secret| audit_text.include?(secret) }
+  leak_context = leaks.map { |secret| audit_text[[ audit_text.index(secret) - 60, 0 ].max, 140] }
   check("AUD1", "the audit log holds rows (#{audit_rows.size}) from the run", audit_rows.size > 10, "rows: #{audit_rows.size}", bad: "MEDIUM")
-  check("AUD2", "no row contains a password, a bcrypt digest, a JWT, an email address, or profile and address values", leaks.empty?, "found: #{leaks.inspect}", bad: "CRITICAL")
+  check("AUD2", "no row contains a password, a bcrypt digest, a JWT, an email address, or profile and address values", leaks.empty?, "found: #{leaks.inspect} in: #{leak_context.inspect}", bad: "CRITICAL")
   check("AUD3", "no row has an empty actor, and system actors are labelled", audit_rows.all? { |x| x["whodunnit"].to_s.match?(/\A(\h{8}-\h{4}-\h{4}-\h{4}-\h{12}|anonymous|system:\S+)\z/) },
         audit_rows.map { |x| x["whodunnit"] }.uniq.first(5).inspect, bad: "HIGH")
   check("AUD4", "sensitive fields appear by name only: no row has values for them", audit_rows.none? { |x| (x["value_changes"].keys & %w[encrypted_password email first_name last_name phone date_of_birth token_digest address_line_1]).any? },
