@@ -16,6 +16,12 @@ class UserPolicy < ApplicationPolicy
 
   def grant_access? = revoke_access?
 
+  # Impersonation: only a super_admin may start one. Which member may be impersonated is a rule of `Impersonations::Start`, which
+  # answers with a message that says why (a super_admin, an archived or access-revoked user). Ending a session is for whoever holds its token.
+  def impersonate? = user.present? && user.super_admin?
+
+  def stop_impersonation? = self?
+
   def show? = self?
 
   def logout? = self?

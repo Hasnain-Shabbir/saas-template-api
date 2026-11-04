@@ -32,6 +32,15 @@ RSpec.describe UserPolicy do
         end
       end
 
+      it "allows impersonate? only for a super_admin (which member may be impersonated is a rule of the service)" do
+        expect(described_class.new(user, other).impersonate?).to be(role == "super_admin")
+      end
+
+      it "allows stop_impersonation? only on themselves" do
+        expect(described_class.new(user, user).stop_impersonation?).to be(true)
+        expect(described_class.new(user, other).stop_impersonation?).to be(false)
+      end
+
       %i[revoke_access? grant_access?].each do |action|
         it "allows #{action} only for a super_admin acting on someone who is not a super_admin" do
           expect(described_class.new(user, other).public_send(action)).to be(role == "super_admin")

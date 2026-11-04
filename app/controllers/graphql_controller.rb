@@ -13,15 +13,28 @@ class GraphqlController < ApplicationController
 
     variables = prepare_variables(params[:variables]) # the request envelope: a malformed one is BAD_REQUEST for everybody
     user = current_user
-    Audit.actor = user.id if user
+    impersonation = nil
+    if user
+      # A token of an impersonation session acts as the target. A session that is over, or whose admin is no longer allowed, is no login.
+      resolved = Impersonations::Resolve.call(user:, token: bearer_token)
+      resolved.success? ? impersonation = resolved.value : user = nil
+    end
+    # Changes made while impersonating are attributed to the real person, the admin.
+    Audit.actor = (impersonation&.impersonator || user).id if user
+    Audit.impersonation = impersonation.id if impersonation
     # Authentication comes before everything GraphQL checks (arguments, enums, variables): nobody logged in gets UNAUTHENTICATED only.
     return render json: { data: nil }.merge(Errors.response_body(Errors::UNAUTHENTICATED)) if user.nil? && AuthGate.login_required?(query, operation_name:)
+
+    # While impersonating, only a short list of mutations may run (default deny). Reading is never blocked here.
+    return render json: { data: nil }.merge(Errors.response_body(Errors::NOT_ALLOWED_WHILE_IMPERSONATING)) if impersonation && ImpersonationGate.blocked?(query, operation_name:)
 
     # Then onboarding: a user with steps left can only reach the operations that let them finish (and log out).
     return render json: { data: nil }.merge(Errors.response_body(Errors::ONBOARDING_REQUIRED)) if user && OnboardingGate.blocked?(user, query, operation_name:)
 
     context = {
-      current_user: user,
+      current_user: user, # while impersonating: the target
+      impersonation:,     # the open session, or nil
+      impersonator: impersonation&.impersonator, # the real admin, or nil
       token: bearer_token,
       request_id: request.request_id # stored next to a read audit row
     }

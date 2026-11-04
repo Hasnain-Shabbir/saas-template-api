@@ -8,8 +8,9 @@ module Types
       group = options[:group]
 
       if seen.add?([ record.class.name, record.id, group ])
-        reader = context[:current_user]&.id || Audit.fallback_actor
-        Audit::RecordRead.call(reader:, record:, group:, request_id: context[:request_id])
+        # While impersonating, the reader is the real admin, never the member they act as (the member reading their own data is not logged).
+        reader = (context[:impersonator] || context[:current_user])&.id || Audit.fallback_actor
+        Audit::RecordRead.call(reader:, record:, group:, request_id: context[:request_id], impersonation_id: context[:impersonation]&.id)
       end
 
       yield(object, arguments)

@@ -9,6 +9,7 @@ module Users
       User.transaction do
         user.update!(access_revoked_at: Time.current)
         user.allowlisted_jwts.delete_all
+        Impersonations::EndAll.call(user:) # a session of this user, as admin or as member, ends now
         OneTimeCode.where(user:).delete_all # a pending login, reset, or email change code must not work later
       end
 

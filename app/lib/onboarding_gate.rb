@@ -4,7 +4,7 @@
 module OnboardingGate
   # Always open to a logged-in user: read who I am (with my onboarding), log out. Public operations stay open too.
   # The operations a step needs (the one that saves its data) are listed on the step in `Onboarding::Registry`, not here.
-  ALWAYS_OPEN = %w[me logout].freeze
+  ALWAYS_OPEN = %w[me logout stopImpersonation].freeze
 
   # True when the user has unfinished steps and the request runs any root field that is not open.
   # A role with no steps is never blocked, and costs no query.

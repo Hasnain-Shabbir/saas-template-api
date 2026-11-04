@@ -13,6 +13,7 @@ module Auth
         # Changing the password already deleted every token of the user (User#revoke_tokens).
         # A reset proves control of the mailbox, so it also lifts a lockout (documented decision).
         verified.value.destroy!
+        Impersonations::EndAll.call(user:) # the new password ended the user's tokens, so it ends their impersonation sessions too
         user.unlock_access! if user.access_locked?
         Result.success
       end

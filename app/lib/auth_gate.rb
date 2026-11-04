@@ -13,14 +13,20 @@ module AuthGate
   # The names of the root fields the operation runs (aliases cannot hide one). Empty when the query cannot be parsed or names no
   # single operation: GraphQL rejects that as BAD_REQUEST, with no data. `OnboardingGate` uses it too.
   def self.root_field_names(query, operation_name: nil)
+    root_operation(query, operation_name:).last
+  end
+
+  # The type of the operation that runs ("query" or "mutation") and its root field names. `[nil, []]` when the query cannot be
+  # parsed or names no single operation. `ImpersonationGate` uses it too.
+  def self.root_operation(query, operation_name: nil)
     document = GraphQL.parse(query, max_tokens: SaasTemplateApiSchema.max_query_string_tokens)
     operation = pick_operation(document, operation_name)
-    return [] unless operation
+    return [ nil, [] ] unless operation
 
     fragments = document.definitions.grep(GraphQL::Language::Nodes::FragmentDefinition).index_by(&:name)
-    root_fields(operation.selections, fragments, Set.new)
+    [ operation.operation_type, root_fields(operation.selections, fragments, Set.new) ]
   rescue GraphQL::ParseError
-    []
+    [ nil, [] ]
   end
 
   def self.public?(field_name)

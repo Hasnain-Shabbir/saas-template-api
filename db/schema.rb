@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_03_121003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "citext"
   enable_extension "pg_catalog.plpgsql"
@@ -36,7 +36,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
     t.jsonb "value_changes", default: {}, null: false
     t.string "request_id"
     t.datetime "created_at", null: false
+    t.uuid "impersonation_id"
     t.index ["created_at"], name: "index_audit_versions_on_created_at"
+    t.index ["impersonation_id"], name: "index_audit_versions_on_impersonation_id", where: "(impersonation_id IS NOT NULL)"
     t.index ["item_type", "item_id", "created_at"], name: "index_audit_versions_on_item_type_and_item_id_and_created_at"
     t.index ["whodunnit"], name: "index_audit_versions_on_whodunnit"
     t.check_constraint "char_length(request_id::text) <= 255", name: "audit_versions_request_id_length"
@@ -61,6 +63,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
     t.check_constraint "char_length(recipient::text) <= 254", name: "email_logs_recipient_length"
     t.check_constraint "char_length(subject::text) <= 255", name: "email_logs_subject_length"
     t.check_constraint "status::text = ANY (ARRAY['sent'::character varying, 'failed'::character varying]::text[])", name: "email_logs_status_values"
+  end
+
+  create_table "impersonations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "impersonator_id", null: false
+    t.uuid "target_id", null: false
+    t.string "jti", null: false
+    t.string "reason_category", null: false
+    t.text "reason"
+    t.string "request_id"
+    t.datetime "started_at", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "ended_at"
+    t.string "ended_reason"
+    t.index ["impersonator_id", "started_at"], name: "index_impersonations_on_impersonator_id_and_started_at"
+    t.index ["impersonator_id"], name: "index_impersonations_one_open_per_impersonator", unique: true, where: "(ended_at IS NULL)"
+    t.index ["jti"], name: "index_impersonations_on_jti", unique: true
+    t.index ["started_at"], name: "index_impersonations_on_started_at"
+    t.index ["target_id", "started_at"], name: "index_impersonations_on_target_id_and_started_at"
+    t.check_constraint "(ended_at IS NULL) = (ended_reason IS NULL)", name: "impersonations_end_fields_together"
+    t.check_constraint "char_length(jti::text) <= 100", name: "impersonations_jti_length"
+    t.check_constraint "char_length(request_id::text) <= 255", name: "impersonations_request_id_length"
+    t.check_constraint "ended_reason::text = ANY (ARRAY['stopped'::character varying, 'expired'::character varying, 'ended_by_system'::character varying]::text[])", name: "impersonations_ended_reason_values"
+    t.check_constraint "expires_at > started_at", name: "impersonations_expires_after_start"
+    t.check_constraint "impersonator_id <> target_id", name: "impersonations_not_self"
+    t.check_constraint "reason IS NULL OR char_length(btrim(reason)) >= 1 AND char_length(btrim(reason)) <= 500", name: "impersonations_reason_length"
+    t.check_constraint "reason_category::text <> 'other'::text OR reason IS NOT NULL", name: "impersonations_other_needs_reason"
+    t.check_constraint "reason_category::text = ANY (ARRAY['support_request'::character varying, 'bug_investigation'::character varying, 'data_correction'::character varying, 'security_investigation'::character varying, 'other'::character varying]::text[])", name: "impersonations_reason_category_values"
   end
 
   create_table "invitations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -112,7 +141,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
     t.string "field_group", null: false
     t.string "request_id"
     t.datetime "created_at", null: false
+    t.uuid "impersonation_id"
     t.index ["created_at"], name: "index_read_audits_on_created_at"
+    t.index ["impersonation_id"], name: "index_read_audits_on_impersonation_id", where: "(impersonation_id IS NOT NULL)"
     t.index ["item_type", "item_id", "created_at"], name: "index_read_audits_on_item_type_and_item_id_and_created_at"
     t.index ["reader", "created_at"], name: "index_read_audits_on_reader_and_created_at"
     t.check_constraint "char_length(reader::text) <= 100", name: "read_audits_reader_length"
@@ -165,7 +196,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_03_100000) do
   end
 
   add_foreign_key "allowlisted_jwts", "users", on_delete: :cascade
+  add_foreign_key "audit_versions", "impersonations", on_delete: :restrict
+  add_foreign_key "impersonations", "users", column: "impersonator_id", on_delete: :restrict
+  add_foreign_key "impersonations", "users", column: "target_id", on_delete: :restrict
   add_foreign_key "invitations", "users", column: "inviter_id", on_delete: :nullify
   add_foreign_key "onboarding_steps", "users", on_delete: :cascade
   add_foreign_key "one_time_codes", "users", on_delete: :cascade
+  add_foreign_key "read_audits", "impersonations", on_delete: :restrict
 end

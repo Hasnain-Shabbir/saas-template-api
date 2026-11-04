@@ -209,6 +209,38 @@ RSpec.describe "Rate limiting and request guards", type: :request do
     end
   end
 
+  describe "impersonation operations" do
+    let(:admin) { create(:user, :super_admin) }
+    let(:token) { token_for(admin) }
+    let(:member) { create(:user) }
+    let(:start) do
+      "mutation($input: StartImpersonationInput!) { startImpersonation(input: $input) { errors { code } } }"
+    end
+    let(:input) { { userId: member.id, reasonCategory: "SUPPORT_REQUEST" } }
+
+    it "allows 10 per hour per IP, then answers 429 RATE_LIMITED with retry-after" do
+      10.times { gql(start, variables: { input: }, token:) }
+      expect(response).to have_http_status(:ok)
+
+      gql(start, variables: { input: }, token:)
+
+      expect_error(:too_many_requests, :RATE_LIMITED)
+      expect(response.headers["retry-after"]).to eq("3600")
+    end
+
+    it "blocks several in one request (aliases) and opens no session" do
+      gql("mutation { a: startImpersonation(input: { userId: \"#{member.id}\", reasonCategory: SUPPORT_REQUEST }) { errors { code } } b: startImpersonation(input: { userId: \"#{member.id}\", reasonCategory: SUPPORT_REQUEST }) { errors { code } } }", token:)
+
+      expect_error(:bad_request, :BAD_REQUEST)
+      expect(Impersonation.count).to eq(0)
+    end
+
+    it "lists every logged-in mutation that starts an impersonation" do
+      expect(Rack::Attack::IMPERSONATION_OPERATIONS).to match_array(%w[startImpersonation])
+      expect(Types::MutationType.fields.keys.map { |name| name.camelize(:lower) }).to include(*Rack::Attack::IMPERSONATION_OPERATIONS)
+    end
+  end
+
   describe "batching" do
     it "blocks several public operations in one request (aliases)" do
       gql("mutation { a: login(input: { email: \"a@example.test\", password: \"x\" }) { success } b: login(input: { email: \"a@example.test\", password: \"y\" }) { success } }")

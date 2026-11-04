@@ -27,6 +27,12 @@ module Types
 
     field :onboarding, Types::OnboardingType, null: false, description: "The onboarding progress of this user. The server finishes a step when the data it needs is saved"
 
+    field :impersonation, Types::ImpersonationType, null: true,
+          description: "The impersonation session of this request, for a banner (\"You are viewing as ...\", with the time it ends). Empty in a normal request"
+
     def onboarding = ::Onboarding::Status.call(user: object).value
+
+    # Only the logged-in user sees it, and only when the request really is an impersonation session.
+    def impersonation = (context[:impersonation] if object.id == context[:current_user]&.id)
   end
 end

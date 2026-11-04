@@ -18,6 +18,8 @@ module Types
     field :unarchive_user, mutation: Mutations::Users::UnarchiveUser
     field :revoke_user_access, mutation: Mutations::Users::RevokeUserAccess
     field :grant_user_access, mutation: Mutations::Users::GrantUserAccess
+    field :start_impersonation, mutation: Mutations::Impersonations::StartImpersonation
+    field :stop_impersonation, mutation: Mutations::Impersonations::StopImpersonation
     field :update_profile, mutation: Mutations::Profiles::UpdateProfile
     field :update_address, mutation: Mutations::Addresses::UpdateAddress
     field :accept_terms, mutation: Mutations::Terms::AcceptTerms

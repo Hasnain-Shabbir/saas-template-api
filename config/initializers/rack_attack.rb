@@ -10,6 +10,8 @@ class Rack::Attack
   INVITATION_OPERATIONS = %w[inviteUser resendInvitation revokeInvitation].freeze
   # Logged-in mutations that block or restore a user. Limited per IP like the invitations (a stolen admin token could lock out many users).
   ARCHIVE_OPERATIONS = %w[archiveUser unarchiveUser].freeze
+  # Logged-in mutation that starts an impersonation. Limited per IP like the archive (a stolen admin token could open sessions on many users).
+  IMPERSONATION_OPERATIONS = %w[startImpersonation].freeze
   MAX_BODY_BYTES =100 * 1024
 
   # Parse the GraphQL POST body once per request and remember it in the Rack env.
@@ -53,6 +55,10 @@ class Rack::Attack
     field_names(req).select { |name| ARCHIVE_OPERATIONS.include?(name) }
   end
 
+  def self.impersonation_operations(req)
+    field_names(req).select { |name| IMPERSONATION_OPERATIONS.include?(name) }
+  end
+
   def self.collect_field_names(node)
     own = node.is_a?(GraphQL::Language::Nodes::Field) ? [ node.name ] : []
     own + node.children.flat_map { |child| collect_field_names(child) }
@@ -71,6 +77,9 @@ class Rack::Attack
 
   # Aliases would archive many users in one request.
   blocklist("graphql/batched-archive-operations") { |req| archive_operations(req).size > 1 }
+
+  # Aliases would open many sessions in one request.
+  blocklist("graphql/batched-impersonation-operations") { |req| impersonation_operations(req).size > 1 }
 
   # Per IP, for every public mutation.
   throttle("public-operations/ip", limit: 10, period: 1.minute) do |req|
@@ -100,6 +109,11 @@ class Rack::Attack
   # Per IP, blocking and restoring users (for example with a stolen admin token).
   throttle("archive/ip", limit: 30, period: 1.hour) do |req|
     req.ip if archive_operations(req).any?
+  end
+
+  # Per IP, starting impersonations (for example with a stolen admin token).
+  throttle("impersonation/ip", limit: 10, period: 1.hour) do |req|
+    req.ip if impersonation_operations(req).any?
   end
 
   self.blocklisted_responder = lambda do |_req|

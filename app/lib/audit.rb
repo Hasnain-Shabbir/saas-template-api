@@ -14,6 +14,12 @@ module Audit
     PaperTrail.request.whodunnit = actor
   end
 
+  # Marks every change saved in this request as made during an impersonation session (the `impersonation_id` column of the audit row).
+  # The actor stays the real admin (see `actor=`). Set by the controller, only for an impersonation token.
+  def self.impersonation=(impersonation_id)
+    PaperTrail.request.controller_info = (PaperTrail.request.controller_info || {}).merge(impersonation_id:)
+  end
+
   def self.fallback_actor
     PaperTrail.request.whodunnit.presence || system_actor(defined?(Rails::Console) ? "console" : "unknown")
   end

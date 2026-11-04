@@ -27,6 +27,7 @@ module Auth
 
         user.update!(email: new_email, pending_email: nil, previous_email: user.email)
         user.allowlisted_jwts.where.not(jti: current_jti(token)).delete_all
+        Impersonations::EndAll.call(user:) # every other session of the user ends, impersonation sessions included
         Result.success
       end
     end

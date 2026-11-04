@@ -44,6 +44,9 @@ module ValidationRules
   ONBOARDING_STEP_KEY_FORMAT = /\A[a-z][a-z0-9_]*\z/
   ONBOARDING_STEP_KEY_MAX_LENGTH = 50
 
+  # The note a super_admin may add when starting an impersonation (required for the category "other"). Free text, so it must never hold personal or health data (said in the API description).
+  IMPERSONATION_REASON_MAX_LENGTH = 500
+
   # The invitation token: random bytes, written URL-safe (base64 without padding: 4 characters per 3 bytes, rounded up).
   INVITATION_TOKEN_BYTES = 32
   INVITATION_TOKEN_FORMAT = /\A[A-Za-z0-9_-]{#{(INVITATION_TOKEN_BYTES * 4 / 3.0).ceil}}\z/
